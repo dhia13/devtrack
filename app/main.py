@@ -1,0 +1,160 @@
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import Body, FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+from . import db, service as s
+from .mcp_server import mcp
+
+STATIC = Path(__file__).parent / "static"
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DEVTRACK_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
+
+mcp_app = mcp.streamable_http_app()
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    db.init()
+    async with mcp.session_manager.run():
+        yield
+
+
+app = FastAPI(title="DevTrack", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
+# Only answer to local host names, so a web page can't reach the API through DNS rebinding.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
+
+@app.exception_handler(s.NotFound)
+async def _not_found(_req: Request, exc: s.NotFound):
+    return JSONResponse({"error": str(exc)}, status_code=404)
+
+
+@app.exception_handler(s.Invalid)
+async def _invalid(_req: Request, exc: s.Invalid):
+    return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+@app.get("/", include_in_schema=False)
+def index():
+    return FileResponse(STATIC / "index.html")
+
+
+@app.get("/api/health")
+def health():
+    return {"ok": True}
+
+
+@app.get("/api/meta")
+def meta():
+    return {
+        "statuses": s.STATUSES, "kinds": s.KINDS, "assignees": s.ASSIGNEES,
+        "priorities": s.PRIORITIES, "note_kinds": s.NOTE_KINDS,
+        "project_statuses": s.PROJECT_STATUSES, "currency": s.DEFAULT_CURRENCY,
+    }
+
+
+# ---- projects
+
+@app.get("/api/projects")
+def projects(include_archived: bool = False):
+    return s.list_projects(include_archived)
+
+
+@app.post("/api/projects")
+def create_project(body: dict = Body(...)):
+    slug = body.pop("slug", None)
+    if not slug:
+        raise s.Invalid("slug is required")
+    return s.upsert_project(slug, **body)
+
+
+@app.patch("/api/projects/{ref}")
+def patch_project(ref: str, body: dict = Body(...)):
+    body.pop("slug", None)
+    return s.upsert_project(ref, **body)
+
+
+@app.delete("/api/projects/{ref}")
+def remove_project(ref: str):
+    s.delete_project(ref)
+    return {"ok": True}
+
+
+# ---- items
+
+@app.get("/api/items")
+def items(project: str | None = None, status: str | None = None, assignee: str | None = None,
+          kind: str | None = None, include_closed: bool = False, search: str | None = None,
+          limit: int = 500):
+    return s.list_items(project, status, assignee, kind, include_closed, search, limit)
+
+
+@app.post("/api/items")
+def create_item(body: dict = Body(...)):
+    project, title = body.pop("project", None), body.pop("title", None)
+    if not project:
+        raise s.Invalid("project is required")
+    return s.create_item(project, title, **body)
+
+
+@app.get("/api/items/{item_id}")
+def item(item_id: int):
+    return s.get_item(item_id)
+
+
+@app.patch("/api/items/{item_id}")
+def patch_item(item_id: int, body: dict = Body(...)):
+    project, note, author = body.pop("project", None), body.pop("note", None), body.pop("author", None)
+    return s.update_item(item_id, project=project, note=note, author=author, **body)
+
+
+@app.delete("/api/items/{item_id}")
+def remove_item(item_id: int):
+    s.delete_item(item_id)
+    return {"ok": True}
+
+
+@app.get("/api/items/{item_id}/redate")
+def redate(item_id: int, day: str | None = None, start: str = "09:00", end: str = "17:00", remote: str = "origin"):
+    return s.redate_plan(item_id, day, start, end, remote)
+
+
+# ---- notes, planning
+
+@app.get("/api/notes")
+def notes(project: str | None = None, item_id: int | None = None, kind: str | None = None, limit: int = 100):
+    return s.list_notes(project, item_id, kind, limit)
+
+
+@app.post("/api/notes")
+def create_note(body: dict = Body(...)):
+    return s.add_note(body.get("project"), body.get("body", ""), body.get("kind", "progress"),
+                      body.get("item_id"), body.get("author") or "me")
+
+
+@app.get("/api/agenda")
+def agenda(days: int = 14, project: str | None = None):
+    return s.agenda(days, project)
+
+
+@app.get("/api/costs")
+def costs(project: str | None = None):
+    return s.cost_summary(project)
+
+
+@app.get("/api/calendar.ics")
+def calendar(project: str | None = None, include_closed: bool = False):
+    return Response(s.calendar_ics(project, include_closed), media_type="text/calendar; charset=utf-8",
+                    headers={"Content-Disposition": 'inline; filename="devtrack.ics"'})
+
+
+@app.get("/api/export")
+def export():
+    return JSONResponse(s.export_all(), headers={"Content-Disposition": 'attachment; filename="devtrack-export.json"'})
+
+
+# MCP streamable HTTP endpoint at /mcp. Mounted last so the routes above win.
+app.mount("/", mcp_app)

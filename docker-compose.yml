@@ -1,0 +1,19 @@
+services:
+  devtrack:
+    build: .
+    image: devtrack:latest
+    container_name: devtrack
+    restart: always
+    ports:
+      # Bound to localhost only: there is no login, so don't expose it on the network.
+      - "127.0.0.1:${DEVTRACK_PORT:-8787}:8787"
+    environment:
+      TZ: ${TZ:-UTC}
+      DEVTRACK_CURRENCY: ${DEVTRACK_CURRENCY:-USD}
+      DEVTRACK_ALLOWED_HOSTS: localhost,127.0.0.1,devtrack.localhost
+      DEVTRACK_SEED_PROJECTS: ${DEVTRACK_SEED_PROJECTS:-frub,3dzprinting,immorio,print-cost-calculator,bistro}
+    volumes:
+      - devtrack-data:/data
+
+volumes:
+  devtrack-data:
