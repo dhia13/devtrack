@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -6,8 +8,10 @@ from fastapi import Body, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import db, service as s
+from . import backup, db, gitsync, service as s
 from .mcp_server import mcp
+
+log = logging.getLogger("devtrack")
 
 STATIC = Path(__file__).parent / "static"
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DEVTRACK_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
@@ -15,11 +19,39 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DEVTRACK_ALLOWED_HOSTS", "lo
 mcp_app = mcp.streamable_http_app()
 
 
+async def _every(seconds: float, job, first_delay: float = 5):
+    """Run a blocking job in a thread forever; errors are logged, never fatal."""
+    await asyncio.sleep(first_delay)
+    while True:
+        try:
+            await asyncio.to_thread(job)
+        except Exception:
+            log.exception("background job %s failed", job.__name__)
+        await asyncio.sleep(seconds)
+
+
+def _backup_if_due():
+    if backup.due():
+        backup.create_backup()
+
+
+def _git_sync():
+    gitsync.sync()
+
+
 @asynccontextmanager
 async def lifespan(_app):
     db.init()
-    async with mcp.session_manager.run():
-        yield
+    jobs = [asyncio.create_task(_every(30 * 60, _backup_if_due))]
+    minutes = float(os.environ.get("DEVTRACK_GIT_SYNC_MINUTES", "15"))
+    if minutes > 0:
+        jobs.append(asyncio.create_task(_every(minutes * 60, _git_sync, first_delay=20)))
+    try:
+        async with mcp.session_manager.run():
+            yield
+    finally:
+        for j in jobs:
+            j.cancel()
 
 
 app = FastAPI(title="DevTrack", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
@@ -30,6 +62,11 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 @app.exception_handler(s.NotFound)
 async def _not_found(_req: Request, exc: s.NotFound):
     return JSONResponse({"error": str(exc)}, status_code=404)
+
+
+@app.exception_handler(backup.BackupError)
+async def _backup_error(_req: Request, exc: backup.BackupError):
+    return JSONResponse({"error": str(exc)}, status_code=400)
 
 
 @app.exception_handler(s.Invalid)
@@ -154,6 +191,42 @@ def calendar(project: str | None = None, include_closed: bool = False):
 @app.get("/api/export")
 def export():
     return JSONResponse(s.export_all(), headers={"Content-Disposition": 'attachment; filename="devtrack-export.json"'})
+
+
+# ---- backups
+
+@app.get("/api/backups")
+def backups():
+    return backup.list_backups()
+
+
+@app.post("/api/backups")
+def backup_now():
+    return backup.create_backup("manual")
+
+
+@app.get("/api/backups/{name}")
+def backup_file(name: str):
+    return FileResponse(backup.path_of(name), media_type="application/vnd.sqlite3", filename=name)
+
+
+@app.post("/api/backups/{name}/restore")
+def backup_restore(name: str):
+    out = backup.restore(name)
+    db.init()  # bring an older snapshot's schema up to date
+    return out
+
+
+# ---- git / MR sync
+
+@app.get("/api/git")
+def git_config():
+    return gitsync.config()
+
+
+@app.post("/api/git/sync")
+def git_sync(project: str | None = None, item_id: int | None = None):
+    return gitsync.sync(project, item_id)
 
 
 # MCP streamable HTTP endpoint at /mcp. Mounted last so the routes above win.

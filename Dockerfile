@@ -1,14 +1,15 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DEVTRACK_DB=/data/devtrack.db
-RUN apt-get update && apt-get install -y --no-install-recommends tzdata && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata git && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 
-RUN useradd --system --uid 10001 devtrack && mkdir /data && chown devtrack /data
+# Repos are mounted read-only and owned by another user; let git read them anyway.
+RUN git config --system safe.directory '*'  && useradd --system --uid 10001 devtrack && mkdir /data /backups && chown devtrack /data /backups
 USER devtrack
 VOLUME /data
 EXPOSE 8787

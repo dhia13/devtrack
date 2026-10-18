@@ -616,6 +616,38 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line-st
   .fgrid { grid-template-columns: 1fr; }
   .dlg-foot .hint { display: none; }
 }
+
+/* ================= hold, git, backups */
+.hold-quick { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 8px; }
+.hold-quick .chip { font-size: 12.5px; padding: 2px 10px; }
+.side-group h5 { display: flex; align-items: center; justify-content: space-between; }
+.side-group h5 .link { font-size: 12px; font-weight: 700; color: var(--accent); background: none; border: 0; cursor: pointer; text-transform: none; letter-spacing: 0; }
+.git-line { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--muted); padding: 2px 0 8px; }
+.git-line .err { color: var(--warn); flex-basis: 100%; }
+.gb { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.gb svg { width: 11px; height: 11px; }
+.gb.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+.gb.mr-open, .gb.mr-draft { color: var(--c-submitted); border-color: color-mix(in srgb, var(--c-submitted) 50%, transparent); }
+.gb.mr-merged { color: var(--c-merged); border-color: color-mix(in srgb, var(--c-merged) 50%, transparent); }
+.gb.mr-closed { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
+a.gb { text-decoration: none; }
+.kcard .gits { display: flex; gap: 5px; flex-wrap: wrap; }
+.kcard.held { opacity: .62; }
+.tag.hold { border-color: color-mix(in srgb, var(--c-parked) 50%, transparent); color: var(--c-parked); }
+.tag.back { border-color: color-mix(in srgb, var(--ok) 55%, transparent); color: var(--ok); }
+.ibtn { border: 0; background: none; color: var(--faint); cursor: pointer; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none; opacity: .0; transition: opacity .12s; }
+.task:hover .ibtn, .row:hover .ibtn, .ibtn:focus-visible { opacity: 1; }
+@media (hover: none) { .ibtn { opacity: 1; } }
+.ibtn:hover { background: var(--hover); color: var(--text); }
+.ibtn svg { width: 16px; height: 16px; }
+.hgroup { padding: 4px 18px 6px; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); display: flex; gap: 8px; }
+#holdDlg { width: min(480px, calc(100vw - 32px)); }
+.bk { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 18px; border-top: 1px solid var(--line); font-size: 13.5px; }
+.bk b { font-weight: 650; font-variant-numeric: tabular-nums; }
+.bk small { color: var(--muted); display: block; font-size: 12.5px; }
+.bk .acts { display: flex; gap: 6px; }
+.okdot, .nodot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--ok); }
+.nodot { background: var(--warn); }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 </head>
@@ -713,8 +745,17 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line-st
           <label class="prop"><span>Deploy</span><span class="with-hint"><input type="date" name="deploy_on"><em class="hint" data-hint="deploy_on"></em></span></label>
           <label class="prop"><span>Due</span><span class="with-hint"><input type="date" name="due_on"><em class="hint" data-hint="due_on"></em></span></label>
         </div>
+        <div class="side-group" id="holdGroup">
+          <h5>On hold</h5>
+          <label class="prop"><span>Waiting for</span><input name="waiting_for" list="waitingList" placeholder="shop, ops, SATIM…"></label>
+          <label class="prop"><span>Check back</span><span class="with-hint"><input type="date" name="snoozed_until"><em class="hint" data-hint="snoozed_until"></em></span></label>
+          <div class="hold-quick" role="group" aria-label="Check back in">
+            <button type="button" class="chip" data-hold-in="1">Tomorrow</button><button type="button" class="chip" data-hold-in="3">3 days</button><button type="button" class="chip" data-hold-in="mon">Monday</button><button type="button" class="chip" data-hold-in="14">2 weeks</button><button type="button" class="chip" data-hold-in="clear">Clear</button>
+          </div>
+        </div>
         <div class="side-group">
-          <h5>Git</h5>
+          <h5>Git <button type="button" class="link" id="gitSyncItem" hidden>Sync now</button></h5>
+          <div class="git-line" id="gitLine" hidden></div>
           <label class="prop"><span>Branch</span><input name="branch" class="mono" placeholder="feat/…"></label>
           <label class="prop"><span>Base</span><input name="base_branch" class="mono" placeholder="main"></label>
           <label class="prop"><span>PR / MR</span><input name="pr_url" placeholder="https://…"></label>
@@ -736,6 +777,31 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line-st
       <span class="hint"><kbd>Ctrl</kbd> <kbd>Enter</kbd> save · <kbd>Esc</kbd> close</span>
       <button type="button" class="btn" data-close>Cancel</button>
       <button type="submit" class="btn primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<datalist id="waitingList"></datalist>
+
+<!-- Hold: quick snooze / waiting for -->
+<dialog id="holdDlg" aria-labelledby="holdTitle">
+  <form id="holdForm" method="dialog" autocomplete="off">
+    <div class="dlg-head"><h2 id="holdTitle">Put on hold</h2><span class="spacer"></span>
+      <button type="button" class="btn ghost icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="dlg-body" style="display:grid;gap:14px">
+      <p class="muted" id="holdItem" style="margin:0"></p>
+      <label class="field">Waiting for<input name="waiting_for" list="waitingList" placeholder="Who has to act first: shop, ops, SATIM, Ny Ony…"></label>
+      <div class="field">Check back
+        <div class="hold-quick">
+          <button type="button" class="chip" data-hold-in="1">Tomorrow</button><button type="button" class="chip" data-hold-in="3">In 3 days</button><button type="button" class="chip" data-hold-in="mon">Next Monday</button><button type="button" class="chip" data-hold-in="14">In 2 weeks</button><button type="button" class="chip" data-hold-in="30">In a month</button>
+        </div>
+        <input type="date" name="snoozed_until">
+      </div>
+      <p class="muted" style="margin:0;font-size:13px">It leaves your to-do list and the bell until the check-back day. With no date, it stays on hold until you take it off.</p>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn ghost" id="unhold" hidden>Take off hold</button><span class="spacer"></span>
+      <button type="button" class="btn" data-close>Cancel</button><button type="submit" class="btn primary">Hold</button>
     </div>
   </form>
 </dialog>
@@ -826,6 +892,79 @@ function pcolor(slug) {
 const pchip = (slug, box = false) => `<span class="pchip${box ? " box" : ""}" style="--pc:${pcolor(slug)}">${esc(slug)}</span>`;
 const FLAG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4h11l-2 4 2 4H5"/></svg>';
 const flag = p => ["urgent", "high"].includes(p) ? `<span class="flag ${p}">${FLAG}${p === "urgent" ? "Urgent" : "High"}</span>` : "";
+
+// ---------- hold (waiting for someone / snoozed)
+const CLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+const BRANCH_I = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 5-8 3-12 7"/></svg>';
+function holdDate(k) {
+  const t = parseISO(todayISO());
+  if (k === "mon") return toISO(addDays(t, ((8 - t.getDay()) % 7) || 7));
+  return toISO(addDays(t, +k));
+}
+const holdTag = it => it.on_hold
+  ? `<span class="tag hold" title="On hold${it.snoozed_until ? " until " + fmtDate(it.snoozed_until) : ""}">${it.waiting_for ? "waiting: " + esc(it.waiting_for) : "snoozed"}${it.snoozed_until ? " · " + fmtDate(it.snoozed_until, { day: "numeric", month: "short" }) : ""}</span>`
+  : it.back_today ? `<span class="tag back" title="Its check-back day has come">back${it.waiting_for ? " from " + esc(it.waiting_for) : ""}</span>` : "";
+const holdBtn = it => `<button type="button" class="ibtn" data-hold="${it.id}" title="${it.on_hold ? "Change hold" : "Put on hold"}" aria-label="Put ${esc(it.title)} on hold">${CLOCK}</button>`;
+state.waitingVals = new Set();
+const noteWaiting = list => list.forEach(i => i.waiting_for && state.waitingVals.add(i.waiting_for));
+function fillWaitingList() { $("#waitingList").innerHTML = [...state.waitingVals].sort().map(v => `<option value="${esc(v)}">`).join(""); }
+
+// ---------- git badges (from the last sync)
+function gitBadges(it, { full = false } = {}) {
+  const g = it.git; if (!g) return "";
+  const out = [];
+  if (g.mr_state) out.push(`<a class="gb mr-${g.mr_state}" href="${esc(g.mr_url || it.pr_url || "#")}" target="_blank" rel="noopener noreferrer" title="Merge request ${g.mr_state}">MR ${g.mr_state}</a>`);
+  if (g.ahead) out.push(`<span class="gb" title="${g.ahead} commit${g.ahead === 1 ? "" : "s"} ahead of ${esc(g.base_ref || "base")}">${BRANCH_I}${g.ahead}↑</span>`);
+  if (g.on_remote === 0 && (g.ahead || full)) out.push(`<span class="gb warn" title="This branch isn't on the remote yet">not pushed</span>`);
+  else if (g.unpushed) out.push(`<span class="gb warn" title="${g.unpushed} local commit(s) not pushed">${g.unpushed} unpushed</span>`);
+  if (g.early_commits && it.status === "parked") out.push(`<span class="gb warn" title="${g.early_commits} commit(s) dated before submit day: run the re-date script">${g.early_commits} to re-date</span>`);
+  return out.join("");
+}
+function gitLine(it) {
+  const g = it.git; if (!g) return it.branch ? `<span>Not synced yet.</span>` : "";
+  const bits = [];
+  if (g.repos?.length) bits.push(`<span class="mono">${esc(g.repos.join(", "))}</span>`);
+  if (g.ahead != null) bits.push(`<span>${g.ahead} ahead, ${g.behind || 0} behind <span class="mono">${esc(g.base_ref)}</span></span>`);
+  if (g.last_commit_at) bits.push(`<span>last commit ${ago(g.last_commit_at)}</span>`);
+  bits.push(gitBadges(it, { full: true }));
+  if (g.error) bits.push(`<span class="err">${esc(g.error)}</span>`);
+  return bits.join("") + `<span style="flex-basis:100%;color:var(--faint);font-size:11.5px">Synced ${ago(g.checked_at)}</span>`;
+}
+
+const holdDlg = $("#holdDlg"), holdForm = $("#holdForm");
+let holding = null;
+async function openHold(id) {
+  holding = await api(`/api/items/${id}`);
+  holdForm.reset(); fillWaitingList();
+  $("#holdItem").textContent = `#${holding.id} ${holding.title}`;
+  holdForm.waiting_for.value = holding.waiting_for || ""; holdForm.snoozed_until.value = holding.snoozed_until || "";
+  $("#unhold").hidden = !(holding.waiting_for || holding.snoozed_until);
+  holdDlg.showModal(); holdForm.waiting_for.focus();
+}
+async function saveHold(fields) {
+  const prev = { waiting_for: holding.waiting_for || null, snoozed_until: holding.snoozed_until || null }, id = holding.id;
+  try {
+    const it = await api(`/api/items/${id}`, { method: "PATCH", body: fields });
+    holdDlg.close();
+    const msg = it.on_hold ? `#${id} on hold${it.snoozed_until ? " until " + fmtDate(it.snoozed_until) : ""}` : `#${id} back on your list`;
+    toast(msg, { label: "Undo", run: async () => { await api(`/api/items/${id}`, { method: "PATCH", body: prev }); toast("Undone"); await loadProjects(); render(); } });
+    await loadProjects(); render();
+  } catch (err) { toast(err.message); }
+}
+holdForm.addEventListener("submit", e => {
+  e.preventDefault();
+  const w = holdForm.waiting_for.value.trim(), d = holdForm.snoozed_until.value;
+  if (!w && !d) return holdForm.waiting_for.focus();
+  saveHold({ waiting_for: w || null, snoozed_until: d || null });
+});
+$("#unhold").onclick = () => saveHold({ waiting_for: null, snoozed_until: null });
+document.addEventListener("click", e => {
+  const q = e.target.closest("[data-hold-in]"); if (!q) return;
+  const form = q.closest("form"), inp = form.snoozed_until;
+  inp.value = q.dataset.holdIn === "clear" ? "" : holdDate(q.dataset.holdIn);
+  if (q.dataset.holdIn === "clear") form.waiting_for.value = "";
+  inp.dispatchEvent(new Event("change", { bubbles: true }));
+});
 
 // ---------- focus sessions (the island keeps the time)
 const focusLog = store.get("devtrack-focuslog", {});
@@ -1224,8 +1363,9 @@ const views = {
     const myTasks = mine.slice(0, showN).map(it => `<div class="task" data-item="${it.id}">
         <input type="checkbox" class="round" data-done="${it.id}" title="Mark done" aria-label="Mark ${esc(it.title)} done">
         <span class="t"><span class="title">${esc(it.title)}</span>
-          <span class="sub">${pchip(it.project)}${it.due_on ? `<span class="${it.due_on < today ? "late" : ""}">${it.due_on === today ? "Today" : rel(it.due_on)}</span>` : ""}</span></span>
-        ${flag(it.priority)}</div>`).join("") || `<div class="empty">Nothing waiting on you.</div>`;
+          <span class="sub">${pchip(it.project)}${it.due_on ? `<span class="${it.due_on < today ? "late" : ""}">${it.due_on === today ? "Today" : rel(it.due_on)}</span>` : ""}${holdTag(it)}</span></span>
+        ${flag(it.priority)}${holdBtn(it)}</div>`).join("") || `<div class="empty">Nothing waiting on you.</div>`;
+    noteWaiting(a.on_hold);
     // focus card
     const focusable = items.filter(i => !["done", "cancelled"].includes(i.status) && (i.status === "in_progress" || i.assignee === "me")).slice(0, 60);
     // this week
@@ -1241,7 +1381,7 @@ const views = {
     return pageH(`${greet}`, summary, acts) + `
       <div class="tiles">
         ${tile("Done today", doneToday.length)}${tile("Focus today", (focusMin / 60).toFixed(1), "<small>h</small>")}
-        ${tile("Overdue", a.overdue.length, "", a.overdue.length ? "alert" : "")}${tile("Waiting on you", a.waiting_on_me.length)}${tile("Parked", a.parked.length)}
+        ${tile("Overdue", a.overdue.length, "", a.overdue.length ? "alert" : "")}${tile("Waiting on you", a.waiting_on_me.length)}${tile("On hold", a.on_hold.length)}${tile("Parked", a.parked.length)}
       </div>
       <div class="home">
         <section class="panel span-5"><div class="panel-h"><div><h3>Today</h3><span class="sub">Close your rings</span></div></div>
@@ -1268,7 +1408,7 @@ const views = {
                 <button class="btn" data-fstate="run" data-focus="end" hidden>End</button>
               </div>
             </div></div></section>
-        <section class="panel span-7"><div class="panel-h"><div><h3>My tasks</h3><span class="sub">Waiting on you, due first</span></div><span class="spacer"></span><button class="link" data-goto="tasks" data-mine>All tasks</button></div>
+        <section class="panel span-7"><div class="panel-h"><div><h3>My tasks</h3><span class="sub">Waiting on you, due first${a.on_hold.length ? ` · ${a.on_hold.length} on hold` : ""}</span></div><span class="spacer"></span>${a.on_hold.length ? `<button class="link" data-goto="agenda">On hold</button>` : ""}<button class="link" data-goto="tasks" data-mine>All tasks</button></div>
           ${myTasks}${mine.length > 7 ? `<button class="more" data-expand="homeMine">${state.expanded.homeMine ? "Show less" : `Show all ${mine.length}`}</button>` : ""}</section>
         <section class="panel span-12"><div class="panel-h"><div><h3>This week</h3><span class="sub">Items finished each day</span></div><span class="spacer"></span><button class="link" data-goto="insights">Insights</button></div>
           <div class="hero"><b>${soFar}</b><span>finished so far</span>${wd === null ? "" : `<span class="${wd >= 0 ? "up" : "down"}">${wd >= 0 ? "+" : ""}${wd}% vs last week</span>`}</div>
@@ -1288,6 +1428,7 @@ const views = {
     const today = todayISO(), wkEnd = toISO(addDays(parseISO(today), 7));
     const mon = toISO(addDays(parseISO(today), -((parseISO(today).getDay() + 6) % 7))), cut = toISO(addDays(parseISO(today), -14));
     let items = await api("/api/items?" + q);
+    noteWaiting(items);
     if (t.mine) items = items.filter(i => i.assignee === "me");
     if (t.priority) items = items.filter(i => i.priority === t.priority);
     const open = items.filter(i => !["done", "cancelled"].includes(i.status));
@@ -1296,11 +1437,13 @@ const views = {
     const card = it => {
       const { total, done } = checklist(it.description), nm = it.next_milestone, closed = it.status === "done";
       const d = closed ? (it.completed_at ? `Done ${fmtDate(it.completed_at, { day: "numeric", month: "short" })}` : "Done") : nm ? `${nm.type} ${nm.date === today ? "today" : fmtDate(nm.date, { day: "numeric", month: "short" })}` : "";
-      return `<div class="kcard${closed ? " closed" : ""}" draggable="true" data-item="${it.id}" data-status="${it.status}">
+      const gb = gitBadges(it), hold = holdTag(it);
+      return `<div class="kcard${closed ? " closed" : ""}${it.on_hold ? " held" : ""}" draggable="true" data-item="${it.id}" data-status="${it.status}">
         <div class="top">${pchip(it.project, true)}${flag(it.priority)}</div>
         <div class="title">${esc(it.title)}</div>
         ${total ? `<div class="bar2"><span class="meter"><i style="width:${Math.round(done / total * 100)}%;background:${pcolor(it.project)}"></i></span>${done}/${total}</div>` : ""}
-        <div class="foot">${d ? `<span class="d ${!closed && it.overdue ? "late" : ""}">${CAL_I}${esc(d)}</span>` : ""}${it.ticket_ref ? `<span>${esc(it.ticket_ref)}</span>` : `<span class="proj">#${it.id}</span>`}${it.needs_redate ? `<span class="tag redate">re-date</span>` : ""}
+        ${gb || hold ? `<div class="gits">${hold}${gb}</div>` : ""}
+        <div class="foot">${d ? `<span class="d ${!closed && it.overdue ? "late" : ""}">${CAL_I}${esc(d)}</span>` : ""}${it.ticket_ref ? `<span>${esc(it.ticket_ref)}</span>` : `<span class="proj">#${it.id}</span>`}${it.needs_redate && !it.git?.early_commits ? `<span class="tag redate">re-date</span>` : ""}
           <span class="who ${it.assignee}" title="${it.assignee === "me" ? "You" : "Agent"}">${it.assignee === "me" ? "ME" : "AI"}</span></div></div>`;
     };
     const lanes = LANES.map(([key, name, sts, c]) => {
@@ -1382,10 +1525,16 @@ const views = {
   },
 
   async settings() {
+    const [bk, gc] = await Promise.all([api("/api/backups").catch(e => ({ error: e.message, backups: [] })), api("/api/git").catch(() => null)]);
     const radio = (name, val, cur, text) => `<label><input type="radio" name="${name}" value="${val}" ${val === cur ? "checked" : ""}><span>${text}</span></label>`;
     const ico = (c, p) => `<span class="ico" style="--c:${c}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${p}</svg></span>`;
     const IC = { look: '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><path d="M12 2a10 10 0 0 0 0 20c1 0 1.6-.8 1.6-1.7 0-.5-.2-.8-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.6 1.7-1.6H16a6 6 0 0 0 6-6c0-4.9-4.5-8.3-10-8.3z"/>',
-      focus: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/>', data: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>', keys: '<rect x="2" y="6" width="20" height="13" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 15h10"/>' };
+      focus: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/>', data: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>', keys: '<rect x="2" y="6" width="20" height="13" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 15h10"/>',
+      git: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 5-8 3-12 7"/>' };
+    const kb = n => n > 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.round(n / 1e3) + " KB";
+    const last = bk.backups.find(b => b.reason !== "pre-restore");
+    const okLine = (ok, yes, no) => `<span class="${ok ? "okdot" : "nodot"}"></span>${ok ? yes : no}`;
+    const lr = gc?.last_run;
     const stepper = (k, unit, step, min, max) => `<span class="stepper"><button type="button" data-step="${k}" data-d="-${step}" data-min="${min}" aria-label="Less">−</button><b>${look[k]} ${unit}</b><button type="button" data-step="${k}" data-d="${step}" data-max="${max}" aria-label="More">+</button></span>`;
     const days = Object.keys(focusLog).length;
     return pageH("Settings", "How DevTrack looks and behaves in this browser") + `
@@ -1393,6 +1542,8 @@ const views = {
         <nav class="panel set-nav" aria-label="Settings sections">
           <button data-sect="appearance">${ico("#a259ff", IC.look)}Appearance</button>
           <button data-sect="focus">${ico("#f08c2e", IC.focus)}Focus</button>
+          <button data-sect="backups">${ico("#e5484d", IC.data)}Backups</button>
+          <button data-sect="git">${ico("#6b5ae0", IC.git)}Git sync</button>
           <button data-sect="data">${ico("#22b37a", IC.data)}Data</button>
           <button data-sect="keys">${ico("#4c7dff", IC.keys)}Shortcuts</button>
         </nav>
@@ -1417,6 +1568,21 @@ const views = {
               <input type="checkbox" class="switch" data-look="sound" ${look.sound ? "checked" : ""} aria-label="Chime"></div>
             <div class="set-row"><span class="t"><b>${focusS ? `In focus · ${mmss(focusLeft())} left` : "Start a session now"}</b><small>${focusS ? esc(focusS.title) : `${look.focusMin} minutes, no item`}</small></span>
               ${focusS ? `<button class="btn" data-focus="end">End session</button>` : `<button class="btn primary" data-fstart>Start</button>`}</div>
+          </section>
+          <section class="panel" id="sect-backups"><div class="panel-h"><div><h3>Backups</h3><span class="sub">A snapshot of the whole database every ${bk.every_hours || 24}h, the newest ${bk.keep || 14} kept</span></div><span class="spacer"></span><button class="btn sm primary" data-backup-now ${bk.writable === false ? "disabled" : ""}>Back up now</button></div>
+            <div class="set-row"><span class="t"><b>${okLine(last && (Date.now() - new Date(last.taken_at)) < 36 * 36e5, `Last backup ${last ? ago(last.taken_at) : ""}`, last ? `Last backup ${ago(last.taken_at)}` : "No backup yet")}</b>
+              <small>Saved on this computer in <span class="mono">${esc(!bk.host_dir || bk.host_dir === "./backups" ? "backups\\ next to docker-compose.yml" : bk.host_dir)}</span>, outside Docker, so they survive losing the container's volume.${bk.writable === false ? ` <span class="late">The folder isn't writable.</span>` : ""}</small></span></div>
+            ${bk.backups.map(b => `<div class="bk"><span><b>${fmtDate(b.taken_at, { weekday: "short", day: "numeric", month: "short" })} ${b.taken_at.slice(11, 16)}</b> <span class="tag">${b.reason}</span>
+                <small>${b.counts ? `${b.counts.items} items · ${b.counts.notes} notes · ${b.counts.projects} projects · ` : ""}${kb(b.size)}</small></span>
+              <span class="acts"><a class="btn sm ghost" href="/api/backups/${encodeURIComponent(b.name)}" download>Download</a><button class="btn sm" data-restore="${esc(b.name)}" data-when="${esc(b.taken_at)}">Restore</button></span></div>`).join("") || `<div class="empty">${esc(bk.error || "No backups yet.")}</div>`}
+          </section>
+          <section class="panel" id="sect-git"><div class="panel-h"><div><h3>Git sync</h3><span class="sub">Branches and MRs, read every ${gc?.every_minutes ?? 15} minutes. Your repos are mounted read-only.</span></div><span class="spacer"></span><button class="btn sm primary" data-git-sync ${gc?.mounted ? "" : "disabled"}>Sync now</button></div>
+            ${gc ? `<div class="set-row"><span class="t"><b>${okLine(gc.mounted, `Repos folder ${esc(gc.repos_host)}`, "Repos folder not mounted")}</b><small>Projects are matched by their repo path; frub-style folders with several repos inside are searched one level down.</small></span></div>
+            <div class="set-row"><span class="t"><b>${okLine(gc.gitlab_token, "GitLab token set", "No GitLab token")}</b><small>${gc.gitlab_token ? `MR state from ${esc(gc.gitlab_url)}` : "Add GITLAB_TOKEN (scope read_api) to .env, then restart, to follow frub's merge requests."}</small></span></div>
+            <div class="set-row"><span class="t"><b>${okLine(gc.github_token, "GitHub token set", "No GitHub token")}</b><small>${gc.github_token ? "PR state from github.com" : "Add GITHUB_TOKEN (fine-grained, Pull requests: read) to .env, then restart, to follow PRs."}</small></span></div>
+            <div class="set-row"><span class="t"><b>${gc.auto_status ? "Moves items forward on its own" : "Status changes are off"}</b><small>An open MR moves an item to submitted, a merged one to merged, with a note. It never moves anything back. Set DEVTRACK_GIT_AUTO_STATUS=0 to turn it off.</small></span></div>
+            <div class="set-row"><span class="t"><b>${lr ? `Last sync ${ago(lr.started_at)}` : "Not synced since the last restart"}</b><small>${lr ? `${lr.items} branches in ${lr.seconds}s · ${lr.changed.length} moved · ${lr.errors} with a warning (open an item to see it)` : "The first sync runs about 20 seconds after start."}</small></span></div>`
+            : `<div class="empty">Git sync isn't available.</div>`}
           </section>
           <section class="panel" id="sect-data"><div class="panel-h"><div><h3>Data</h3><span class="sub">Everything lives in the DevTrack container</span></div></div>
             <div class="set-row"><span class="t"><b>Export everything</b><small>Projects, items and notes as JSON</small></span><a class="btn" href="/api/export" download>Export JSON</a></div>
@@ -1445,8 +1611,13 @@ const views = {
     const itemRow = (it, check) => `<div class="row" data-item="${it.id}">
         ${check ? `<input type="checkbox" class="round" data-done="${it.id}" title="Mark done" aria-label="Mark ${esc(it.title)} done">` : ""}
         <span class="t"><span class="title">${esc(it.title)}</span>
-          <span class="sub"><span class="proj">${esc(it.project)}</span>${it.branch ? `<span class="mono">${esc(it.branch)}</span>` : ""}${it.submit_on ? `<span>submit ${fmtDate(it.submit_on)}</span>` : ""}${it.due_on ? `<span class="${it.due_on < a.today ? "late" : ""}">due ${fmtDate(it.due_on)}</span>` : ""}</span></span>
-        <span class="right">${statusChip(it.status)}</span></div>`;
+          <span class="sub"><span class="proj">${esc(it.project)}</span>${it.branch ? `<span class="mono">${esc(it.branch)}</span>` : ""}${it.submit_on ? `<span>submit ${fmtDate(it.submit_on)}</span>` : ""}${it.due_on ? `<span class="${it.due_on < a.today ? "late" : ""}">due ${fmtDate(it.due_on)}</span>` : ""}${holdTag(it)}${gitBadges(it)}</span></span>
+        <span class="right">${it.assignee === "me" ? holdBtn(it) : ""}${statusChip(it.status)}</span></div>`;
+    noteWaiting(a.on_hold);
+    const byWait = {};
+    a.on_hold.forEach(i => (byWait[i.waiting_for || "Snoozed"] ||= []).push(i));
+    const holdPanel = Object.entries(byWait).sort((x, y) => y[1].length - x[1].length)
+      .map(([w, list]) => `<div class="hgroup">${esc(w)} <span class="count">${list.length}</span></div>` + list.map(it => itemRow(it, false)).join("")).join("");
     const counts = {};
     a.waiting_on_me.forEach(i => counts[i.project] = (counts[i.project] || 0) + 1);
     const meProj = counts[state.meProject] ? state.meProject : "";
@@ -1481,6 +1652,7 @@ const views = {
         <div class="panel tile ${allOverdue ? "alert" : ""}"><span class="n">${allOverdue}</span><span class="l">Overdue milestones</span></div>
         <div class="panel tile"><span class="n">${allEv.length - allOverdue}</span><span class="l">Milestones in the next 14 days</span></div>
         <div class="panel tile"><span class="n">${a.waiting_on_me.length}</span><span class="l">Waiting on you</span></div>
+        <div class="panel tile"><span class="n">${a.on_hold.length}</span><span class="l">On hold, waiting on others</span></div>
         <div class="panel tile"><span class="n">${a.parked.length}</span><span class="l">Parked, built early</span></div>
       </div>
       <div class="cols">
@@ -1491,6 +1663,7 @@ const views = {
         </div>
         <div class="stack">
           <div class="panel"><div class="panel-h"><h3>Parked, needs re-date</h3><span class="count">${a.parked.length}</span></div>${list("parked", a.parked, false, "No early builds waiting.")}</div>
+          <div class="panel"><div class="panel-h"><div><h3>On hold</h3><span class="sub">Waiting on someone else, or snoozed. They come back on their check-back day.</span></div><span class="count">${a.on_hold.length}</span></div>${holdPanel || `<div class="empty">Nothing on hold. Use the clock on a to-do to park it.</div>`}</div>
           <div class="panel"><div class="panel-h"><h3>Blocked</h3><span class="count">${a.blocked.length}</span></div>${list("blocked", a.blocked, false, "Nothing blocked.")}</div>
         </div>
       </div>`;
@@ -1741,7 +1914,7 @@ async function quickCheck(cb) {
 // ---------- item dialog
 const itemDlg = $("#itemDlg"), itemForm = $("#itemForm");
 let editing = null, dirty = false;
-const ITEM_KEYS = ["title","project","kind","status","assignee","priority","ticket_ref","description","branch","base_branch","built_on","pr_url","commit_date","submit_on","merge_on","deploy_on","due_on","estimate_hours","actual_hours","cost","currency"];
+const ITEM_KEYS = ["title","project","kind","status","assignee","priority","ticket_ref","description","branch","base_branch","built_on","pr_url","commit_date","submit_on","merge_on","deploy_on","due_on","estimate_hours","actual_hours","cost","currency","waiting_for","snoozed_until"];
 const fillSelect = (sel, values) => sel.innerHTML = values.map(v => `<option value="${esc(v)}">${esc(label(v))}</option>`).join("");
 const fit = ta => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
 function paintStatus() { const s = itemForm.status; s.className = "status-select s-" + s.value; }
@@ -1774,6 +1947,9 @@ async function openItem(id, preset = {}) {
   $("#activitySection").hidden = !editing;
   $("#checklistProgress").innerHTML = progressHTML(it.description);
   paintStatus(); paintHints(); renderItemNotes();
+  noteWaiting([it]); fillWaitingList();
+  const gl = $("#gitLine"); gl.innerHTML = editing ? gitLine(editing) : ""; gl.hidden = !(editing && editing.branch);
+  $("#gitSyncItem").hidden = !(editing && editing.branch);
   dirty = false;
   itemDlg.showModal(); fit(itemForm.title);
   if (!editing) itemForm.title.focus();
@@ -1811,6 +1987,17 @@ $("#addItemNote").onclick = async () => {
     await api("/api/notes", { method: "POST", body: { item_id: editing.id, body: v, kind: $("#noteKind").value } });
     editing.notes = (await api(`/api/items/${editing.id}`)).notes; setEditor(ta, ""); renderItemNotes(); toast("Note added");
   } catch (err) { toast(err.message); }
+};
+$("#gitSyncItem").onclick = async () => {
+  const b = $("#gitSyncItem"); b.textContent = "Syncing…"; b.disabled = true;
+  try {
+    const r = await api(`/api/git/sync?item_id=${editing.id}`, { method: "POST" });
+    const fresh = await api(`/api/items/${editing.id}`);
+    editing.git = fresh.git; $("#gitLine").innerHTML = gitLine(fresh);
+    if (r.changed.length) { toast(`#${editing.id} moved to ${label(r.changed[0].changed)} by git sync`); itemForm.status.value = fresh.status; paintStatus(); editing.notes = fresh.notes; renderItemNotes(); }
+    else toast("Git status refreshed");
+  } catch (err) { toast(err.message); }
+  b.textContent = "Sync now"; b.disabled = false;
 };
 $("#focusBtn").onclick = () => { const it = editing; dirty = false; itemDlg.close(); startFocus(look.focusMin, { id: it.id, title: it.title }); toast(`Focusing on #${it.id} for ${look.focusMin} min`); };
 $("#redateBtn").onclick = async () => {
@@ -1884,6 +2071,7 @@ $("#view").addEventListener("click", async e => {
     if (t.closest("td.cb") && !t.matches("input")) { const cb = $("input", t.closest("td.cb")); cb.click(); }
     return;
   }
+  const hb = t.closest("[data-hold]"); if (hb) { e.stopPropagation(); return openHold(hb.dataset.hold); }
   const go = t.closest("[data-goto]"); if (go) { if (go.hasAttribute("data-mine")) state.tasks.mine = true; state.view = go.dataset.goto; return render(); }
   if (t.closest("[data-new]")) return openItem(null);
   const ln = t.closest("[data-lane-new]"); if (ln) return openItem(null, { status: ln.dataset.laneNew });
@@ -1902,6 +2090,23 @@ $("#view").addEventListener("click", async e => {
     const k = st.dataset.step, d = +st.dataset.d; look[k] = Math.min(+(st.dataset.max || 1e9), Math.max(+(st.dataset.min || 0), look[k] + d)); applyLook(); return render();
   }
   const sc = t.closest("[data-sect]"); if (sc) return $("#sect-" + sc.dataset.sect)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (t.closest("[data-backup-now]")) {
+    try { const b = await api("/api/backups", { method: "POST" }); toast(`Backed up: ${b.counts?.items ?? ""} items`); } catch (err) { toast(err.message); }
+    return render();
+  }
+  const rs = t.closest("[data-restore]"); if (rs) {
+    const when = `${fmtDate(rs.dataset.when, { weekday: "long", day: "numeric", month: "long" })} ${rs.dataset.when.slice(11, 16)}`;
+    if (!(await ask("Restore this backup?", `Everything goes back to how it was on ${when}. Changes since then are lost, but a safety backup of the current state is taken first.`, { ok: "Restore", danger: true }))) return;
+    try { const r = await api(`/api/backups/${encodeURIComponent(rs.dataset.restore)}/restore`, { method: "POST" }); toast(`Restored · ${r.counts.items} items. Safety copy saved.`); await loadProjects(); }
+    catch (err) { toast(err.message); }
+    return render();
+  }
+  if (t.closest("[data-git-sync]")) {
+    const b = t.closest("[data-git-sync]"); b.disabled = true; b.textContent = "Syncing…";
+    try { const r = await api("/api/git/sync", { method: "POST" }); toast(`Synced ${r.items} branches${r.changed.length ? ` · ${r.changed.length} moved forward` : ""}`); await loadProjects(); }
+    catch (err) { toast(err.message); }
+    return render();
+  }
   if (t.closest("[data-clear-focus]")) {
     if (!(await ask("Clear focus history?", "Removes the focus minutes this browser has logged. Items and notes are not touched.", { ok: "Clear", danger: true }))) return;
     Object.keys(focusLog).forEach(k => delete focusLog[k]); store.set("devtrack-focuslog", focusLog); toast("Focus history cleared"); return render();

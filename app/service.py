@@ -33,8 +33,8 @@ MILESTONES = (
     ("due", "due_on", RANK["done"]),
 )
 
-TEXT_FIELDS = ("title", "description", "ticket_ref", "branch", "base_branch", "pr_url", "currency")
-DATE_FIELDS = ("built_on", "submit_on", "merge_on", "deploy_on", "due_on")
+TEXT_FIELDS = ("title", "description", "ticket_ref", "branch", "base_branch", "pr_url", "currency", "waiting_for")
+DATE_FIELDS = ("built_on", "submit_on", "merge_on", "deploy_on", "due_on", "snoozed_until")
 DATETIME_FIELDS = ("commit_date",)
 NUM_FIELDS = ("estimate_hours", "actual_hours", "cost")
 ENUM_FIELDS = {"kind": KINDS, "status": STATUSES, "assignee": ASSIGNEES, "priority": PRIORITIES}
@@ -130,6 +130,15 @@ def _item_dict(row) -> dict:
     pending.sort()
     it["next_milestone"] = {"type": pending[0][1], "date": pending[0][0]} if pending else None
     it["overdue"] = bool(pending and pending[0][0] < today)
+    # On hold: snoozed to a later day, or waiting on someone with no check-back date.
+    # Held items drop out of "waiting on you" until the day comes.
+    snooze = it.get("snoozed_until")
+    it["on_hold"] = it["status"] not in CLOSED and bool((snooze and snooze > today) or (it.get("waiting_for") and not snooze))
+    it["back_today"] = bool(snooze and snooze <= today and it["status"] not in CLOSED)
+    git = {k[4:]: it.pop(k) for k in list(it) if k.startswith("git_")}
+    it["git"] = git if git.get("checked_at") else None
+    if it["git"]:
+        it["git"]["repos"] = [r for r in (it["git"]["repos"] or "").splitlines() if r]
     it["needs_redate"] = bool(
         it["branch"] and rank < RANK["submitted"] and it["status"] != "cancelled" and (
             it["status"] == "parked"
@@ -139,10 +148,15 @@ def _item_dict(row) -> dict:
     return it
 
 
-ITEM_SELECT = """
-SELECT i.*, p.slug AS project, p.name AS project_name
+GIT_COLS = ("repos", "head_sha", "last_commit_at", "ahead", "behind", "base_ref", "unpushed", "on_remote",
+            "early_commits", "mr_url", "mr_state", "mr_merged_at", "error", "checked_at")
+ITEM_SELECT = f"""
+SELECT i.*, p.slug AS project, p.name AS project_name, {", ".join(f"g.{c} AS git_{c}" for c in GIT_COLS)}
 FROM items i JOIN projects p ON p.id = i.project_id
+LEFT JOIN git_status g ON g.item_id = i.id
 """
+# COALESCE: a NULL snooze date must count as "not held", not as NULL (NOT NULL is NULL in SQL).
+HOLD_SQL = "(COALESCE(i.snoozed_until > date('now','localtime'), 0) OR (i.waiting_for IS NOT NULL AND i.snoozed_until IS NULL))"
 
 
 def _sort_key(it: dict):
@@ -183,13 +197,15 @@ def list_projects(include_archived: bool = False) -> list[dict]:
     sql = """
     SELECT p.*,
       SUM(CASE WHEN i.status NOT IN ('done','cancelled') THEN 1 ELSE 0 END) AS open_items,
-      SUM(CASE WHEN i.status NOT IN ('done','cancelled') AND i.assignee = 'me' THEN 1 ELSE 0 END) AS my_items,
+      SUM(CASE WHEN i.status NOT IN ('done','cancelled') AND i.assignee = 'me' AND NOT {hold} THEN 1 ELSE 0 END) AS my_items,
+      SUM(CASE WHEN i.status NOT IN ('done','cancelled') AND {hold} THEN 1 ELSE 0 END) AS on_hold_items,
       SUM(CASE WHEN i.status = 'parked' THEN 1 ELSE 0 END) AS parked_items,
       SUM(CASE WHEN i.status NOT IN ('done','cancelled') THEN COALESCE(i.estimate_hours, 0) ELSE 0 END) AS open_estimate_hours,
       SUM(CASE WHEN i.status NOT IN ('done','cancelled') THEN COALESCE(i.cost, 0) ELSE 0 END) AS open_cost,
       (SELECT MAX(created_at) FROM notes n WHERE n.project_id = p.id) AS last_note_at
     FROM projects p LEFT JOIN items i ON i.project_id = p.id
     """
+    sql = sql.replace("{hold}", HOLD_SQL)
     if not include_archived:
         sql += " WHERE p.status != 'archived'"
     sql += " GROUP BY p.id ORDER BY p.status = 'active' DESC, p.slug"
@@ -404,8 +420,13 @@ def handoff(project, summary: str, author=None, done=None, next_steps=None,
 
 def _compact(it: dict) -> dict:
     keys = ("id", "project", "title", "status", "assignee", "priority", "kind", "branch",
-            "submit_on", "merge_on", "deploy_on", "due_on", "needs_redate", "pr_url")
-    return {k: it[k] for k in keys}
+            "submit_on", "merge_on", "deploy_on", "due_on", "needs_redate", "pr_url",
+            "waiting_for", "snoozed_until", "on_hold", "back_today")
+    out = {k: it[k] for k in keys}
+    g = it.get("git")
+    if g:
+        out["git"] = {k: g[k] for k in ("ahead", "base_ref", "on_remote", "unpushed", "early_commits", "mr_state", "mr_url", "error")}
+    return out
 
 
 def agenda(days: int = 7, project=None) -> dict:
@@ -432,7 +453,9 @@ def agenda(days: int = 7, project=None) -> dict:
         "horizon": horizon,
         "overdue": overdue,
         "upcoming": upcoming,
-        "waiting_on_me": [_compact(i) for i in items if i["assignee"] == "me"],
+        "waiting_on_me": [_compact(i) for i in items if i["assignee"] == "me" and not i["on_hold"]],
+        "on_hold": sorted((_compact(i) for i in items if i["on_hold"]),
+                          key=lambda i: (i["snoozed_until"] or "9999-12-31", i["waiting_for"] or "")),
         "parked": [_compact(i) for i in items if i["status"] == "parked"],
         "blocked": [_compact(i) for i in items if i["status"] == "blocked"],
     }
@@ -528,8 +551,8 @@ def export_all() -> dict:
 
 
 def _ics_text(value: str) -> str:
-    return (str(value).replace("\\", "\\\\").replace(";", "\;").replace(",", "\,")
-            .replace("\r\n", "\n").replace("\n", "\n"))
+    return (str(value).replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
+            .replace("\r\n", "\n").replace("\n", "\\n"))
 
 
 def _ics_fold(line: str) -> str:

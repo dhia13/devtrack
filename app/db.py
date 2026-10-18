@@ -44,7 +44,9 @@ CREATE TABLE IF NOT EXISTS items (
     currency       TEXT,
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL,
-    completed_at   TEXT
+    completed_at   TEXT,
+    waiting_for    TEXT,
+    snoozed_until  TEXT
 );
 CREATE INDEX IF NOT EXISTS items_project ON items(project_id);
 CREATE INDEX IF NOT EXISTS items_status ON items(status);
@@ -60,7 +62,31 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 CREATE INDEX IF NOT EXISTS notes_project ON notes(project_id, created_at);
 CREATE INDEX IF NOT EXISTS notes_item ON notes(item_id);
+
+-- Last git/MR sync result per item (written by gitsync, never edited by hand).
+CREATE TABLE IF NOT EXISTS git_status (
+    item_id       INTEGER PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+    repos         TEXT,
+    head_sha      TEXT,
+    last_commit_at TEXT,
+    ahead         INTEGER,
+    behind        INTEGER,
+    base_ref      TEXT,
+    unpushed      INTEGER,
+    on_remote     INTEGER,
+    early_commits INTEGER,
+    mr_url        TEXT,
+    mr_state      TEXT,
+    mr_merged_at  TEXT,
+    error         TEXT,
+    checked_at    TEXT NOT NULL
+);
 """
+
+# Columns added after the first release; init() adds whichever are missing.
+MIGRATIONS = {
+    "items": {"waiting_for": "TEXT", "snoozed_until": "TEXT"},
+}
 
 
 def now() -> str:
@@ -91,6 +117,11 @@ def init() -> None:
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     with tx() as conn:
         conn.execute("PRAGMA journal_mode = WAL")
+        for table, cols in MIGRATIONS.items():
+            have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+            for col, decl in cols.items():
+                if have and col not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
         conn.executescript(SCHEMA)
         empty = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
         if empty:

@@ -7,7 +7,8 @@ estimates and cost.
 
 It's one Docker container with three parts:
 
-- **Dashboard** at http://localhost:8787: agenda, items, projects with costs, activity feed.
+- **Dashboard** at http://localhost:8787: home, tasks board, agenda, calendar, projects, insights,
+  activity, settings, and a focus timer.
 - **MCP server** at http://localhost:8787/mcp (streamable HTTP), used by coding agents in any repo.
 - **REST API** at http://localhost:8787/api (docs at `/api/docs`).
 
@@ -44,6 +45,7 @@ instructions file, with `<slug>` set to that project's slug.
 | `commit_date` | exact timestamp to stamp commits with, if not the submit day |
 | `merge_on`, `deploy_on`, `due_on` | planned milestones; they show on the agenda until reached |
 | `estimate_hours`, `actual_hours`, `cost`, `currency` | effort and cost, summed per project |
+| `waiting_for`, `snoozed_until` | on hold: who it waits on, and when to check back (see below) |
 
 Dates accept `YYYY-MM-DD`, `today`, `tomorrow`, `+3d`, `friday`, `next friday`.
 
@@ -58,6 +60,7 @@ Dates accept `YYYY-MM-DD`, `today`, `tomorrow`, `+3d`, `friday`, `next friday`.
 | `handoff` | End-of-session report; each `user_todos` entry becomes an item assigned to you |
 | `cost_summary` | Estimate, actual hours and cost per project |
 | `redate_plan` | Script that rebases a parked branch and spreads its commit dates over the submit day |
+| `git_sync` | Refresh branch and MR state now instead of at the next 15-minute run |
 
 ## Re-dating a branch built early
 
@@ -67,7 +70,42 @@ Git Bash at the repo root. It fetches, rebases onto `origin/<base>`, and spreads
 committer dates evenly between 09:00 and 17:00 on that day (in the container's `TZ`). Check the
 printed log, then `git push --force-with-lease`.
 
+## On hold
+
+A to-do that can't move until someone else acts (the shop, ops, an account approval) goes on hold:
+set `waiting_for` and, optionally, `snoozed_until`. Use the clock button on a to-do, or the
+**On hold** group in the item dialog. Held items leave "waiting on you", the bell and the Home rings.
+On the check-back day they come back with a "back" tag. With no date they stay held until you take
+them off hold. The Agenda lists everything on hold, grouped by who it waits on.
+
+## Git sync
+
+Every 15 minutes DevTrack reads each open item's branch from your repos. They are mounted read-only
+from `DEVTRACK_REPOS_HOST` (default `D:/Work`); a project's `repo_path` must be inside it. Folders
+that hold several repos, like `frub/backend` and `frub/admin`, are searched one level down. Per item
+it records:
+
+- commits ahead of and behind its base (the first word of `base_branch`, else the default branch)
+- whether the branch is on the remote, and how many commits aren't pushed (as of your last fetch;
+  DevTrack never fetches or writes)
+- how many commits are dated before `submit_on`, i.e. still to re-date
+- its merge request (GitLab) or pull request (GitHub), from `pr_url` or found by branch name
+
+With `GITLAB_TOKEN` (scope `read_api`) and/or `GITHUB_TOKEN` (fine-grained, Pull requests:
+read-only) in `.env`, an item whose MR opens moves to `submitted` and one whose MR merges moves to
+`merged`, with a note, and gets its `pr_url` filled in. It never moves an item backwards. Set
+`DEVTRACK_GIT_AUTO_STATUS=0` to only show the state. Without tokens only the local branch state is
+shown, because your repos are private.
+
 ## Backup
+
+A snapshot of the whole database is taken on start and then every 24 hours into `backups/` next to
+`docker-compose.yml` (`DEVTRACK_BACKUP_HOST_DIR`), outside Docker, so it survives losing the
+volume. The newest 14 are kept (`DEVTRACK_BACKUP_KEEP`). **Settings → Backups** lists them, takes
+one on demand, downloads one, or restores one. A restore first saves a `pre-restore` copy of the
+current state.
+
+A JSON export is still available:
 
 ```bash
 curl -o devtrack-backup.json http://localhost:8787/api/export

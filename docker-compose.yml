@@ -12,8 +12,20 @@ services:
       DEVTRACK_CURRENCY: ${DEVTRACK_CURRENCY:-USD}
       DEVTRACK_ALLOWED_HOSTS: localhost,127.0.0.1,devtrack.localhost
       DEVTRACK_SEED_PROJECTS: ${DEVTRACK_SEED_PROJECTS:-frub,3dzprinting,immorio,print-cost-calculator,bistro}
+      # Daily snapshots go to a host folder, so they survive losing the Docker volume.
+      DEVTRACK_BACKUP_KEEP: ${DEVTRACK_BACKUP_KEEP:-14}
+      DEVTRACK_BACKUP_HOST_DIR: ${DEVTRACK_BACKUP_HOST_DIR:-./backups}
+      # Git sync reads your repos through a read-only mount of this folder.
+      DEVTRACK_REPOS_HOST: ${DEVTRACK_REPOS_HOST:-D:/Work}
+      DEVTRACK_GIT_SYNC_MINUTES: ${DEVTRACK_GIT_SYNC_MINUTES:-15}
+      DEVTRACK_GIT_AUTO_STATUS: ${DEVTRACK_GIT_AUTO_STATUS:-1}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      GITLAB_URL: ${GITLAB_URL:-https://gitlab.com}
     volumes:
       - devtrack-data:/data
+      - ${DEVTRACK_BACKUP_HOST_DIR:-./backups}:/backups
+      - ${DEVTRACK_REPOS_HOST:-D:/Work}:/repos:ro
 
 volumes:
   devtrack-data:

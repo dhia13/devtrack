@@ -4,7 +4,7 @@ from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
 
-from . import service as s
+from . import gitsync, service as s
 
 INSTRUCTIONS = """\
 DevTrack is the developer's single tracker for every repo they work on (frub, 3dzprinting,
@@ -20,7 +20,11 @@ Workflow:
 - Work built ahead of its date: set status='parked' and submit_on. On the submit day, call
   `redate_plan` and give the developer the script; it rebases the branch and re-dates commits.
 - Anything the developer must do themselves (approve, set secrets, test on device, pay, deploy):
-  record it as an item with assignee='me', never only in chat.
+  record it as an item with assignee='me', never only in chat. If it can't be done yet because it
+  waits on someone else (a client, ops, an account approval), set waiting_for (who) and
+  snoozed_until (when to check back); held items leave the developer's list until that day.
+- Branch, MR and status: git sync runs every 15 minutes and moves items to submitted/merged when
+  their MR opens or merges. Call `git_sync` after pushing or opening an MR to refresh it now.
 - Session end: ALWAYS call `handoff` with what was done, what is next, and the developer's to-dos.
 Dates accept YYYY-MM-DD, today, tomorrow, +3d, friday, next friday.
 """
@@ -103,13 +107,17 @@ def create_item(
     actual_hours: float | None = None,
     cost: float | None = None,
     currency: str | None = None,
+    waiting_for: str | None = None,
+    snoozed_until: str | None = None,
 ) -> dict:
     """Track a unit of work (ticket, feature, bug, follow-up, deploy). Unknown project slugs are
     created. assignee='me' means the developer has to do it.
     submit_on = date the work should be submitted (commits/PR dated then); commit_date = exact
     YYYY-MM-DDTHH:MM to stamp commits with; merge_on / deploy_on = planned merge and deploy;
-    built_on = when it was actually built (status 'parked' fills it with today)."""
-    return s.create_item(project, title, **_given(
+    built_on = when it was actually built (status 'parked' fills it with today).
+    waiting_for = who it waits on (e.g. "shop", "ops", "SATIM"); snoozed_until = check-back date.
+    Either one puts the item on hold, out of the developer's to-do list until that date."""
+    return s.create_item(project, title, **_given(waiting_for=waiting_for, snoozed_until=snoozed_until,
         description=description, kind=kind, status=status, assignee=assignee, priority=priority,
         ticket_ref=ticket_ref, branch=branch, base_branch=base_branch, pr_url=pr_url,
         built_on=built_on, submit_on=submit_on, commit_date=commit_date, merge_on=merge_on,
@@ -144,10 +152,14 @@ def update_item(
     actual_hours: float | None = None,
     cost: float | None = None,
     currency: str | None = None,
+    waiting_for: str | None = None,
+    snoozed_until: str | None = None,
 ) -> dict:
     """Update an item. Omitted fields are unchanged; pass "" to clear a text/date field.
-    `note` adds a progress note to the item's history in the same call."""
+    `note` adds a progress note to the item's history in the same call.
+    waiting_for / snoozed_until put it on hold (pass "" to both to take it off hold)."""
     return s.update_item(item_id, project=project, note=note, author=author, **_given(
+        waiting_for=waiting_for, snoozed_until=snoozed_until,
         title=title, description=description, kind=kind, status=status, assignee=assignee,
         priority=priority, ticket_ref=ticket_ref, branch=branch, base_branch=base_branch,
         pr_url=pr_url, built_on=built_on, submit_on=submit_on, commit_date=commit_date,
@@ -197,7 +209,8 @@ def handoff(
 @mcp.tool()
 def agenda(days: int = 7, project: str | None = None) -> dict:
     """What is due: overdue milestones, upcoming submit/merge/deploy/due dates within `days`,
-    items waiting on the developer, parked (built-early) and blocked items."""
+    items waiting on the developer, items on hold (waiting on others / snoozed), parked
+    (built-early) and blocked items. Items carry a `git` summary when the branch was synced."""
     return s.agenda(days, project)
 
 
@@ -214,3 +227,11 @@ def redate_plan(item_id: int, day: str | None = None, start: str = "09:00",
     author/committer dates across `day` (default: commit_date, else submit_on) between start
     and end. Show it to the developer; do not force-push without their go-ahead."""
     return s.redate_plan(item_id, day, start, end, remote)
+
+
+@mcp.tool()
+def git_sync(project: str | None = None, item_id: int | None = None) -> dict:
+    """Re-read branches (ahead/behind base, unpushed commits, commits dated before submit_on) and
+    MR/PR state for open items with a branch, now instead of at the next 15-minute run. Items move
+    to submitted/merged when their MR is open/merged, and get pr_url when an MR is found."""
+    return gitsync.sync(project, item_id)
