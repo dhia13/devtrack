@@ -193,6 +193,45 @@ def export():
     return JSONResponse(s.export_all(), headers={"Content-Disposition": 'attachment; filename="devtrack-export.json"'})
 
 
+# ---- focus & time
+
+@app.post("/api/focus")
+def focus_log(body: dict = Body(...)):
+    return s.log_focus(body.get("minutes"), body.get("item_id"), body.get("started_at"), body.get("day"))
+
+
+@app.post("/api/focus/import")
+def focus_import(body: dict = Body(...)):
+    return s.import_focus(body.get("log") or {})
+
+
+@app.get("/api/focus/daily")
+def focus_daily(days: int = 120, project: str | None = None):
+    return s.focus_daily(days, project)
+
+
+@app.delete("/api/focus")
+def focus_clear():
+    return s.clear_focus()
+
+
+@app.get("/api/time")
+def time_report(start: str | None = None, end: str | None = None):
+    return s.time_report(start, end)
+
+
+@app.get("/api/time.csv")
+def time_csv(start: str | None = None, end: str | None = None):
+    r = s.time_report(start, end)
+    lines = ["project,focus_hours,sessions,finished_items,estimate_hours,actual_hours,cost"]
+    for p in r["projects"]:
+        cost = " ".join(f"{v:g} {k}" for k, v in p["cost"].items())
+        lines.append(f'{p["project"]},{p["focus_minutes"] / 60:.2f},{p["sessions"]},{p["finished"]},'
+                     f'{p["estimate_hours"]:g},{p["actual_hours"]:g},{cost}')
+    return Response("\n".join(lines) + "\n", media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="devtrack-time-{r["start"]}-{r["end"]}.csv"'})
+
+
 # ---- backups
 
 @app.get("/api/backups")

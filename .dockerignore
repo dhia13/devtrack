@@ -4,3 +4,6 @@ __pycache__/
 *.pyc
 docs/
 backups/
+tests/
+requirements-dev.txt
+.github/

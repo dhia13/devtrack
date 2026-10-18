@@ -617,6 +617,25 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line-st
   .dlg-foot .hint { display: none; }
 }
 
+
+/* ================= command bar */
+#cmdk { width: min(640px, calc(100vw - 24px)); margin-top: 12vh; padding: 0; }
+.ck-in { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.ck-in svg { width: 19px; height: 19px; color: var(--muted); flex: none; }
+.ck-in input { flex: 1; border: 0; background: none; font-size: 17px; padding: 2px 0; box-shadow: none !important; }
+.ck-list { max-height: min(56vh, 460px); overflow: auto; padding: 6px; }
+.ck-sec { padding: 8px 12px 4px; font-size: 11.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.ck-it { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 12px; cursor: pointer; min-width: 0; }
+.ck-it .ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--panel-2); color: var(--muted); flex: none; }
+.ck-it .ic svg { width: 15px; height: 15px; }
+.ck-it .tx { flex: 1; min-width: 0; }
+.ck-it .tx b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ck-it .tx small { display: flex; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; margin-top: 2px; align-items: center; }
+.ck-it kbd { flex: none; }
+.ck-it.on { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.ck-it.on .ic { background: var(--accent); color: #fff; }
+.ck-foot { display: flex; gap: 14px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--faint); flex-wrap: wrap; }
+.ck-empty { padding: 26px; text-align: center; color: var(--muted); }
 /* ================= hold, git, backups */
 .hold-quick { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 8px; }
 .hold-quick .chip { font-size: 12.5px; padding: 2px 10px; }
@@ -682,7 +701,7 @@ a.gb { text-decoration: none; }
 <div class="shell">
   <div class="topbar">
     <div class="tools glass">
-      <button type="button" id="tSearch" title="Search tasks ( / )" aria-label="Search tasks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+      <button type="button" id="tSearch" title="Search and commands (Ctrl K)" aria-label="Search and commands"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
       <button type="button" id="newItem" title="New item (N)" aria-label="New item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
       <button type="button" id="tTheme" title="Switch light / dark" aria-label="Switch light or dark theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
       <button type="button" id="tBell" title="Waiting on you" aria-label="Waiting on you"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span class="badge" id="bellN" hidden></span></button>
@@ -782,6 +801,14 @@ a.gb { text-decoration: none; }
 </dialog>
 
 <datalist id="waitingList"></datalist>
+
+<!-- Command bar (Ctrl+K) -->
+<dialog id="cmdk" aria-label="Command bar">
+  <div class="ck-in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="ckq" placeholder="Search items, run a command, or type a new item" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="cklist" aria-autocomplete="list"></div>
+  <div class="ck-list" id="cklist" role="listbox"></div>
+  <div class="ck-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>Enter</kbd> run</span><span><kbd>Shift</kbd> <kbd>Enter</kbd> create</span><span><kbd>#12</kbd> opens item 12</span><span class="mono">Fix PDF frub high due friday #bug</span></div>
+</dialog>
 
 <!-- Hold: quick snooze / waiting for -->
 <dialog id="holdDlg" aria-labelledby="holdTitle">
@@ -967,17 +994,28 @@ document.addEventListener("click", e => {
 });
 
 // ---------- focus sessions (the island keeps the time)
-const focusLog = store.get("devtrack-focuslog", {});
+// Focus history lives on the server (focus_sessions); this is a {day: minutes} cache of it.
+const focusLog = {};
+async function loadFocus() {
+  try {
+    const old = store.get("devtrack-focuslog", null); // history kept in the browser before v3
+    if (old && Object.keys(old).length) { await api("/api/focus/import", { method: "POST", body: { log: old } }); localStorage.removeItem("devtrack-focuslog"); }
+    const d = await api("/api/focus/daily?days=400");
+    Object.keys(focusLog).forEach(k => delete focusLog[k]); Object.assign(focusLog, d);
+  } catch {}
+}
 let focusS = store.get("devtrack-focus", null);
 const focusLeft = () => !focusS ? 0 : focusS.endsAt ? Math.max(0, Math.round((focusS.endsAt - Date.now()) / 1000)) : focusS.left;
 const mmss = s => `${Math.floor(s / 60)}:${pad(s % 60)}`;
 const saveFocus = () => store.set("devtrack-focus", focusS);
-function logFocus(min) {
+function logFocus(min, itemId, startedAt) {
   if (min < 1) return; const d = todayISO();
-  focusLog[d] = Math.round((focusLog[d] || 0) + min); store.set("devtrack-focuslog", focusLog);
+  focusLog[d] = Math.round((focusLog[d] || 0) + min);
+  api("/api/focus", { method: "POST", body: { minutes: min, item_id: itemId || null, started_at: startedAt } })
+    .catch(e => toast(`Focus not saved: ${e.message}`));
 }
 function startFocus(min = look.focusMin, item = null, mode = "focus") {
-  focusS = { mode, total: min * 60, endsAt: Date.now() + min * 6e4, left: null, itemId: item?.id || null, title: item?.title || (mode === "focus" ? `${min}-minute block` : "Break") };
+  focusS = { mode, total: min * 60, startedAt: Date.now(), endsAt: Date.now() + min * 6e4, left: null, itemId: item?.id || null, title: item?.title || (mode === "focus" ? `${min}-minute block` : "Break") };
   saveFocus(); paintFocus(); island.classList.add("pulse"); setTimeout(() => island.classList.remove("pulse"), 500);
 }
 function focusAction(a) {
@@ -1005,7 +1043,7 @@ function finishFocus(completed) {
   const min = Math.round((s.total - focusLeft()) / 60);
   focusS = null; saveFocus();
   if (s.mode === "focus") {
-    logFocus(min);
+    logFocus(min, s.itemId, new Date(s.startedAt || Date.now() - min * 6e4).toISOString().slice(0, 19));
     if (completed) { beep(); startFocus(look.breakMin, null, "break"); }
     else paintFocus();
     const act = s.itemId && min >= 1 ? { label: `Log ${min}m to #${s.itemId}`, run: () => logToItem(s.itemId, min) } : null;
@@ -1467,8 +1505,20 @@ const views = {
   },
 
   async insights() {
-    const R = state.ins.range, items = await allItems(), today = todayISO();
+    const R = state.ins.range, today = todayISO();
     const start = toISO(addDays(parseISO(today), -(R - 1))), pstart = toISO(addDays(parseISO(start), -R));
+    const [items, tr] = await Promise.all([allItems(), api(`/api/time?start=${start}&end=${today}`)]);
+    const pf = projectFilter.value, trRows = tr.projects.filter(r => !pf || r.project === pf);
+    const acc = r => r.paired ? Math.round(r.paired_actual / r.paired_estimate * 100) : null;
+    const timeTable = trRows.length ? `<div class="tablewrap"><table>
+        <thead><tr><th>Project</th><th class="num">Focus</th><th class="num">Sessions</th><th class="num">Finished</th><th class="num">Estimate</th><th class="num">Actual</th><th class="num" title="For finished items that have both an estimate and actual hours: actual as a share of the estimate">Actual vs estimate</th><th class="num">Cost</th></tr></thead>
+        <tbody>${trRows.map(r => `<tr ${r.project !== "(no item)" ? `data-filter-project="${esc(r.project)}"` : ""}>
+          <td>${r.project === "(no item)" ? `<span class="muted">Focus with no item</span>` : pchip(r.project)}</td>
+          <td class="num">${r.focus_minutes ? (r.focus_minutes / 60).toFixed(1) + "h" : "–"}</td><td class="num">${r.sessions || "–"}</td>
+          <td class="num">${r.finished || "–"}</td><td class="num">${hours(r.estimate_hours) || "–"}</td><td class="num">${hours(r.actual_hours) || "–"}</td>
+          <td class="num" title="${r.paired ? `${r.paired} item${r.paired === 1 ? "" : "s"} with both numbers` : "No finished item has both an estimate and actual hours"}">${acc(r) === null ? "–" : `<span class="${acc(r) > 120 ? "late" : ""}">${acc(r)}%</span> <span class="muted" style="font-size:12px">of ${r.paired}</span>`}</td>
+          <td class="num">${Object.entries(r.cost).map(([k, v]) => money(v, k)).join(" · ") || "–"}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty">No focus sessions or finished items in this range.</div>`;
     const inP = (d, a, b) => d && d >= a && d <= b, pend = toISO(addDays(parseISO(start), -1));
     const cur = items.filter(i => inP(doneDay(i), start, today)), prev = items.filter(i => inP(doneDay(i), pstart, pend));
     const onTime = arr => { const w = arr.filter(i => i.due_on); return { n: w.length, ok: w.filter(i => doneDay(i) <= i.due_on).length }; };
@@ -1516,9 +1566,11 @@ const views = {
           <div class="panel-h" style="padding-top:8px"><h3 style="font-size:14px">Oldest open items</h3></div>
           ${slow.map(i => `<div class="upn" data-item="${i.id}" style="--c:var(--c-${i.status})"><b>${esc(i.title)}</b><span>${pchip(i.project)} · ${Math.floor(daysBetween(i.created_at, new Date()))}d old</span></div>`).join("") || `<div class="empty">No open items.</div>`}
           <div style="height:10px"></div></section>
-        <section class="panel span-7"><div class="panel-h"><div><h3>Focus</h3><span class="sub">Minutes focused each day, from sessions in this browser</span></div></div>
+        <section class="panel span-7"><div class="panel-h"><div><h3>Focus</h3><span class="sub">Minutes focused each day, from the focus timer</span></div></div>
           <div class="hero"><b>${fh.toFixed(1)}h</b><span>about ${(fh / R).toFixed(1)}h a day</span></div>
           ${barChart(focusDays.map(d => ({ label: lbl(d), value: focusLog[d] || 0, tip: `${fmtDate(d, { weekday: "short", day: "numeric", month: "short" })} · ${focusLog[d] || 0} min` })), { cls: "focus", h: 150, frac: 7 / 12 })}</section>
+        <section class="panel span-12"><div class="panel-h"><div><h3>Time by project</h3><span class="sub">Focus-timer hours in the range, and estimate vs actual for items finished in it</span></div><span class="spacer"></span>
+            <a class="btn sm" href="/api/time.csv?start=${start}&end=${today}" download>Download CSV</a></div>${timeTable}</section>
         <section class="panel span-5"><div class="panel-h"><div><h3>Workload</h3><span class="sub">Open estimate hours per project</span></div></div>
           <div class="hbars">${wl.map(([p, w]) => `<div class="hbar" data-filter-project="${esc(p)}" title="${w.n} open, ${w.me} on you">${pchip(p)}<span class="track"><i style="width:${w.h / wmax * 100}%;--pc:${pcolor(p)}"></i></span><span>${w.h ? +w.h.toFixed(1) + "h" : "–"} · ${w.n}</span></div>`).join("") || `<div class="empty">No open items.</div>`}</div></section>
       </div>`;
@@ -1588,11 +1640,11 @@ const views = {
             <div class="set-row"><span class="t"><b>Export everything</b><small>Projects, items and notes as JSON</small></span><a class="btn" href="/api/export" download>Export JSON</a></div>
             <div class="set-row"><span class="t"><b>Calendar feed</b><small>Subscribe in Outlook or Apple Calendar: <span class="mono">${esc(location.origin)}/api/calendar.ics</span></small></span><a class="btn" href="/api/calendar.ics" download="devtrack.ics">Download .ics</a></div>
             <div class="set-row"><span class="t"><b>API</b><small>REST docs; agents use the MCP endpoint at <span class="mono">/mcp</span></small></span><a class="btn" href="/api/docs" target="_blank" rel="noopener">Open docs</a></div>
-            <div class="set-row"><span class="t"><b>Focus history</b><small>${days ? `${days} day${days === 1 ? "" : "s"} of focus minutes, kept in this browser only` : "No focus sessions logged yet"}</small></span>
+            <div class="set-row"><span class="t"><b>Focus history</b><small>${days ? `${days} day${days === 1 ? "" : "s"} of focus sessions, saved in DevTrack` : "No focus sessions logged yet"}</small></span>
               <button class="btn danger" data-clear-focus ${days ? "" : "disabled"}>Clear</button></div>
           </section>
           <section class="panel" id="sect-keys"><div class="panel-h"><h3>Shortcuts</h3></div>
-            <div class="keys">${[["New item", "N"], ["Search tasks", "/"], ["Switch view", "1 – 8"], ["Start or pause focus", "F"], ["Calendar: move", "← →"], ["Calendar: today", "T"], ["Save item", "Ctrl Enter"], ["Close dialog", "Esc"]]
+            <div class="keys">${[["Command bar", "Ctrl K"], ["New item", "N"], ["Filter tasks", "/"], ["Switch view", "1 – 8"], ["Start or pause focus", "F"], ["Calendar: move", "← →"], ["Calendar: today", "T"], ["Save item", "Ctrl Enter"], ["Close dialog", "Esc"]]
               .map(([a, k]) => `<div><span>${a}</span><span>${k.split(" ").map(x => `<kbd>${x}</kbd>`).join(" ")}</span></div>`).join("")}</div></section>
         </div>
       </div>`;
@@ -2042,6 +2094,123 @@ $("#deleteProj").onclick = async () => {
   await api(`/api/projects/${editingProj.id}`, { method: "DELETE" }); projDlg.close(); await loadProjects(); render();
 };
 
+
+// ---------- command bar (Ctrl+K)
+const cmdk = $("#cmdk"), ckq = $("#ckq"), cklist = $("#cklist");
+const ICON = {
+  go: '<path d="m9 18 6-6-6-6"/>', plus: '<path d="M12 5v14M5 12h14"/>', item: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="m9 12 2 2 4-4"/>',
+  focus: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/>', git: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 5-8 3-12 7"/>',
+  disk: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/>', theme: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/>',
+  proj: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+};
+const ic = k => `<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg></span>`;
+const VIEW_NAMES = { home: "Home", tasks: "Tasks", agenda: "Agenda", calendar: "Calendar", projects: "Projects", insights: "Insights", activity: "Activity", settings: "Settings" };
+const DATE_WORD = /^(today|tomorrow|\+\d+d|\d{4}-\d{2}-\d{2}|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i;
+// "Fix invoice PDF frub high due friday #bug" -> title + {project, priority, due_on, kind}
+function parseQuick(text) {
+  const out = { fields: {}, chips: [] }, words = text.trim().split(/\s+/), keep = [];
+  const slugs = new Set(state.projects.map(p => p.slug)), f = out.fields;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i], lw = w.toLowerCase().replace(/^@/, "");
+    const ms = { submit: "submit_on", merge: "merge_on", deploy: "deploy_on", due: "due_on", by: "due_on" }[lw];
+    if (ms && keep.length && words[i + 1]) {
+      let d = words[i + 1].toLowerCase(), used = 1;
+      if (d === "next" && words[i + 2] && DATE_WORD.test(words[i + 2])) { d = "next " + words[i + 2].toLowerCase(); used = 2; }
+      if (DATE_WORD.test(d) || d.startsWith("next ")) { f[ms] = d; out.chips.push(`${ms.replace("_on", "")} ${d}`); i += used; continue; }
+    }
+    // a project slug or a priority word only counts after the first word, so a title can start with it
+    if (!f.project && slugs.has(lw) && (w.startsWith("@") || keep.length)) { f.project = lw; continue; }
+    if (!f.priority && /^!?(urgent|high|low)$/i.test(w) && keep.length) { f.priority = lw.replace("!", ""); out.chips.push(f.priority); continue; }
+    if (/^#(bug|feature|chore|task|followup|deploy)$/i.test(w)) { f.kind = w.slice(1).toLowerCase(); out.chips.push(f.kind); continue; }
+    if (lw === "me" && /^(for|on)$/i.test(keep.at(-1) || "")) { keep.pop(); f.assignee = "me"; out.chips.push("for you"); continue; }
+    keep.push(w);
+  }
+  out.title = keep.join(" ");
+  return out;
+}
+let ckItems = [], ckSel = 0, ckSeq = 0;
+function ckCommands() {
+  return [
+    { k: "plus", t: "New item", s: "Open the item editor", kbd: "N", run: () => openItem(null) },
+    { k: "focus", t: focusS ? (focusS.endsAt ? "Pause focus" : "Resume focus") : `Start a ${look.focusMin}-minute focus`, s: focusS ? focusS.title : "The island keeps the time", kbd: "F", run: () => focusS ? focusAction("pause") : startFocus() },
+    ...(focusS ? [{ k: "focus", t: "End focus session", run: () => focusAction("end") }] : []),
+    { k: "git", t: "Sync git now", s: "Branches and MRs", run: async () => { toast("Syncing git…"); const r = await api("/api/git/sync", { method: "POST" }); toast(`Synced ${r.items} branches${r.changed.length ? ` · ${r.changed.length} moved forward` : ""}`); render(); } },
+    { k: "disk", t: "Back up now", s: "Snapshot the database", run: async () => { const b = await api("/api/backups", { method: "POST" }); toast(`Backed up ${b.counts?.items ?? ""} items`); } },
+    { k: "theme", t: isDark() ? "Switch to light" : "Switch to dark", run: () => { look.theme = isDark() ? "light" : "dark"; applyLook(); render(); } },
+    ...VIEWS.map((v, i) => ({ k: "go", t: `Go to ${VIEW_NAMES[v]}`, kbd: String(i + 1), run: () => { state.view = v; render(); } })),
+    { k: "proj", t: "Show all projects", run: () => { projectFilter.value = ""; render(); } },
+    ...state.projects.map(p => ({ k: "proj", t: `Show ${p.name}`, s: `${p.open_items || 0} open · ${p.my_items || 0} on you`, run: () => { projectFilter.value = p.slug; render(); } })),
+  ];
+}
+const fuzzy = (q, t) => { q = q.toLowerCase(); t = t.toLowerCase(); let i = 0; for (const ch of t) if (ch === q[i]) i++; return i === q.length; };
+async function ckRender() {
+  const q = ckq.value.trim(), seq = ++ckSeq;
+  const all = ckCommands(), ql = q.toLowerCase();
+  // commands whose name contains the text lead (so "sync" + Enter syncs); fuzzy-only ones trail
+  const strong = q ? all.filter(c => c.t.toLowerCase().includes(ql)) : all;
+  const cmds = q ? all.filter(c => !strong.includes(c) && fuzzy(q, c.t)) : [];
+  let found = [];
+  const idm = q.match(/^#?(\d+)$/);
+  if (q.length >= 2 || idm) {
+    try {
+      found = idm ? [await api(`/api/items/${idm[1]}`).catch(() => null)].filter(Boolean)
+        : await api(`/api/items?include_closed=true&limit=8&search=${encodeURIComponent(q)}`);
+    } catch { found = []; }
+    if (seq !== ckSeq) return; // a newer keystroke is already rendering
+  }
+  const quick = q.length >= 3 && !idm ? parseQuick(q) : null;
+  const qProj = quick && (quick.fields.project || projectFilter.value || state.projects[0]?.slug);
+  ckItems = [
+    ...strong.slice(0, q ? 6 : 30).map(c => ({ sec: "Commands", ...c, sub: c.s ? esc(c.s) : "" })),
+    ...found.slice(0, 8).map(it => ({ sec: "Items", k: "item", t: `#${it.id} ${it.title}`, sub: `${pchip(it.project)}${statusChip(it.status)}${holdTag(it)}`, run: () => openItem(it.id) })),
+    ...(quick && quick.title ? [{ sec: "Create", k: "plus", t: `New item: ${quick.title}`, kbd: "Shift ↵",
+        sub: pchip(qProj) + quick.chips.map(c => `<span class="tag">${esc(c)}</span>`).join(""), run: () => quickCreate(quick, qProj) }] : []),
+    ...cmds.slice(0, 5).map(c => ({ sec: "More commands", ...c, sub: c.s ? esc(c.s) : "" })),
+  ];
+  ckSel = Math.min(ckSel, Math.max(0, ckItems.length - 1));
+  let sec = "";
+  cklist.innerHTML = ckItems.map((x, i) => (x.sec !== sec ? `<div class="ck-sec">${(sec = x.sec)}</div>` : "")
+    + `<div class="ck-it${i === ckSel ? " on" : ""}" role="option" aria-selected="${i === ckSel}" data-ck="${i}">${ic(x.k)}<span class="tx"><b>${esc(x.t)}</b>${x.sub ? `<small>${x.sub}</small>` : ""}</span>${x.kbd ? `<kbd>${x.kbd}</kbd>` : ""}</div>`).join("")
+    || `<div class="ck-empty">Nothing matches.</div>`;
+}
+async function quickCreate(qp, project) {
+  try {
+    const it = await api("/api/items", { method: "POST", body: { ...qp.fields, project, title: qp.title } });
+    toast(`Created #${it.id} in ${it.project}`, { label: "Open", run: () => openItem(it.id) });
+    await loadProjects(); render();
+  } catch (err) { toast(err.message); }
+}
+function openCmdk() { if (cmdk.open) return; ckq.value = ""; ckSel = 0; cmdk.showModal(); ckRender(); ckq.focus(); }
+async function ckRun(i) {
+  const x = ckItems[i]; if (!x) return;
+  cmdk.close();
+  try { await x.run(); } catch (err) { toast(err.message); }
+}
+let ckT;
+ckq.addEventListener("input", () => { ckSel = 0; clearTimeout(ckT); ckT = setTimeout(ckRender, 120); });
+ckq.addEventListener("keydown", e => {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault(); if (!ckItems.length) return;
+    ckSel = (ckSel + (e.key === "ArrowDown" ? 1 : -1) + ckItems.length) % ckItems.length;
+    $$(".ck-it", cklist).forEach((n, i) => { n.classList.toggle("on", i === ckSel); n.setAttribute("aria-selected", i === ckSel); });
+    $(".ck-it.on", cklist)?.scrollIntoView({ block: "nearest" });
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    clearTimeout(ckT);
+    const go = () => { if (e.shiftKey) { const qi = ckItems.findIndex(x => x.sec === "Create"); if (qi >= 0) return ckRun(qi); } ckRun(ckSel); };
+    // results lag the input by the debounce; render first so Enter acts on what was typed
+    ckRender().then(go);
+  }
+});
+cklist.addEventListener("click", e => { const n = e.target.closest("[data-ck]"); if (n) ckRun(+n.dataset.ck); });
+cmdk.addEventListener("mousedown", e => { if (e.target === cmdk) cmdk.close(); });
+document.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k" && !e.target.closest?.(".editor")) {
+    e.preventDefault();
+    if (cmdk.open) cmdk.close(); else if (!document.querySelector("dialog[open]")) openCmdk();
+  }
+});
+
 // ---------- wiring
 mountEditors(document);
 fillSelect($("#noteKind"), ["progress", "decision", "blocker", "info", "handoff"]);
@@ -2051,7 +2220,7 @@ $("#nav").onclick = e => { const v = e.target.closest("[data-view]")?.dataset.vi
 const projectFilter = $("#projectFilter");
 projectFilter.onchange = () => { state.selected.clear(); render(); };
 $("#newItem").onclick = () => openItem(null);
-$("#tSearch").onclick = () => goSearch();
+$("#tSearch").onclick = () => openCmdk();
 $("#tTheme").onclick = () => { look.theme = isDark() ? "light" : "dark"; applyLook(); if (state.view === "settings") render(); };
 $("#tBell").onclick = () => { state.view = "home"; render(); };
 island.addEventListener("click", e => {
@@ -2108,8 +2277,8 @@ $("#view").addEventListener("click", async e => {
     return render();
   }
   if (t.closest("[data-clear-focus]")) {
-    if (!(await ask("Clear focus history?", "Removes the focus minutes this browser has logged. Items and notes are not touched.", { ok: "Clear", danger: true }))) return;
-    Object.keys(focusLog).forEach(k => delete focusLog[k]); store.set("devtrack-focuslog", focusLog); toast("Focus history cleared"); return render();
+    if (!(await ask("Clear focus history?", "Deletes every logged focus session. Items, notes and their actual hours are not touched.", { ok: "Clear", danger: true }))) return;
+    await api("/api/focus", { method: "DELETE" }); Object.keys(focusLog).forEach(k => delete focusLog[k]); toast("Focus history cleared"); return render();
   }
   const mp = t.closest("[data-me-proj]"); if (mp) { state.meProject = mp.dataset.meProj; state.expanded.me = false; return render(); }
   if (t.closest("[data-tl-reset]")) { state.tl = { project: "", status: "", type: "" }; return render(); }
@@ -2244,6 +2413,7 @@ setInterval(() => {
   applyLook(); paintFocus();
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => look.theme === "auto" && state.view === "settings" && render());
   state.meta = await api("/api/meta");
+  await loadFocus();
   await loadProjects();
   render();
 })();

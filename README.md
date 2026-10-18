@@ -61,6 +61,7 @@ Dates accept `YYYY-MM-DD`, `today`, `tomorrow`, `+3d`, `friday`, `next friday`.
 | `cost_summary` | Estimate, actual hours and cost per project |
 | `redate_plan` | Script that rebases a parked branch and spreads its commit dates over the submit day |
 | `git_sync` | Refresh branch and MR state now instead of at the next 15-minute run |
+| `time_report` | Focus hours per project, and estimate vs actual for items finished in a date range |
 
 ## Re-dating a branch built early
 
@@ -69,6 +70,28 @@ On the day, run the script from `redate_plan`, or from **Re-date script** in the
 Git Bash at the repo root. It fetches, rebases onto `origin/<base>`, and spreads author and
 committer dates evenly between 09:00 and 17:00 on that day (in the container's `TZ`). Check the
 printed log, then `git push --force-with-lease`.
+
+## Command bar
+
+Press **Ctrl K** anywhere (or the search button) to jump to a view, run a command (start focus,
+sync git, back up, switch theme, filter a project), search items, or open one with `#123`.
+Typing a line also offers to create it, reading the extras out of it:
+
+```
+Fix invoice PDF frub high due friday #bug
+```
+
+That creates "Fix invoice PDF" in `frub`, priority high, due Friday, kind bug. It understands a
+project slug (or `@slug`), `urgent` / `high` / `low`, `submit|merge|deploy|due <date>` with the
+same dates as the API (`tomorrow`, `+3d`, `friday`, `next friday`, `2026-11-02`), `#bug`-style
+kinds and `for me`. **Shift Enter** creates it even when another result is selected.
+
+## Focus and time
+
+The focus timer (the island at the top) saves every finished block to DevTrack, linked to an item
+when you start it from one. Ending a block also offers to add its minutes to the item's actual
+hours. **Insights → Time by project** shows focus hours per project for the chosen range, and, for
+items finished in it, estimate vs actual hours and cost, with a CSV download (`/api/time.csv`).
 
 ## On hold
 
@@ -110,6 +133,17 @@ A JSON export is still available:
 ```bash
 curl -o devtrack-backup.json http://localhost:8787/api/export
 ```
+
+## Development
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest -q
+```
+
+Or inside the image:
+`docker run --rm -u root -v "$PWD:/w" -w /w devtrack sh -c "pip install -q -r requirements-dev.txt && python -m pytest -q"`.
+GitHub Actions runs the tests and a container health check on every push.
 
 ## Security
 

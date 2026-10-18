@@ -235,3 +235,10 @@ def git_sync(project: str | None = None, item_id: int | None = None) -> dict:
     MR/PR state for open items with a branch, now instead of at the next 15-minute run. Items move
     to submitted/merged when their MR is open/merged, and get pr_url when an MR is found."""
     return gitsync.sync(project, item_id)
+
+
+@mcp.tool()
+def time_report(start: str | None = None, end: str | None = None) -> dict:
+    """Per project for start..end (default last 30 days): focus-timer hours and sessions, and for
+    items finished in the range their estimate vs actual hours and cost."""
+    return s.time_report(start, end)

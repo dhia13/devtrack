@@ -63,6 +63,18 @@ CREATE TABLE IF NOT EXISTS notes (
 CREATE INDEX IF NOT EXISTS notes_project ON notes(project_id, created_at);
 CREATE INDEX IF NOT EXISTS notes_item ON notes(item_id);
 
+-- Focus timer sessions (the island). item_id is optional; project_id follows the item.
+CREATE TABLE IF NOT EXISTS focus_sessions (
+    id         INTEGER PRIMARY KEY,
+    item_id    INTEGER REFERENCES items(id) ON DELETE SET NULL,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    day        TEXT NOT NULL,
+    started_at TEXT,
+    minutes    INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS focus_day ON focus_sessions(day);
+
 -- Last git/MR sync result per item (written by gitsync, never edited by hand).
 CREATE TABLE IF NOT EXISTS git_status (
     item_id       INTEGER PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,

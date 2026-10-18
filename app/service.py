@@ -547,6 +547,7 @@ def export_all() -> dict:
             "projects": [dict(r) for r in conn.execute("SELECT * FROM projects ORDER BY id")],
             "items": [dict(r) for r in conn.execute("SELECT * FROM items ORDER BY id")],
             "notes": [dict(r) for r in conn.execute("SELECT * FROM notes ORDER BY id")],
+            "focus_sessions": [dict(r) for r in conn.execute("SELECT * FROM focus_sessions ORDER BY id")],
         }
 
 
@@ -599,3 +600,90 @@ def calendar_ics(project=None, include_closed: bool = False) -> str:
             ]
     lines.append("END:VCALENDAR")
     return "\r\n".join(_ics_fold(line) for line in lines) + "\r\n"
+
+
+# ---------------------------------------------------------------- focus sessions & time
+
+def log_focus(minutes, item_id=None, started_at=None, day=None) -> dict:
+    """Record a finished focus block. Minutes under 1 are ignored by the caller."""
+    try:
+        minutes = int(round(float(minutes)))
+    except (TypeError, ValueError):
+        raise Invalid("minutes must be a number") from None
+    if not 1 <= minutes <= 24 * 60:
+        raise Invalid("minutes must be between 1 and 1440")
+    started = parse_datetime(started_at) if started_at else None
+    the_day = parse_date(day).isoformat() if day else (started[:10] if started else date.today().isoformat())
+    with tx() as conn:
+        project_id = None
+        if item_id:
+            it = _fetch_item(conn, item_id)
+            project_id = it["project_id"]
+        cur = conn.execute(
+            "INSERT INTO focus_sessions (item_id, project_id, day, started_at, minutes, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (item_id or None, project_id, the_day, started, minutes, now()),
+        )
+        return dict(conn.execute("SELECT * FROM focus_sessions WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+def import_focus(log: dict) -> dict:
+    """One-off import of the browser's old {day: minutes} history."""
+    n = 0
+    for day, minutes in (log or {}).items():
+        if minutes and float(minutes) >= 1:
+            log_focus(minutes, day=day)
+            n += 1
+    return {"imported_days": n}
+
+
+def focus_daily(days: int = 120, project=None) -> dict:
+    """{day: minutes} for the last `days` days."""
+    since = (date.today() - timedelta(days=max(1, int(days)) - 1)).isoformat()
+    sql, args = "SELECT day, SUM(minutes) FROM focus_sessions WHERE day >= ?", [since]
+    with tx() as conn:
+        if project:
+            sql += " AND project_id = ?"
+            args.append(_get_project(conn, project)["id"])
+        return {d: m for d, m in conn.execute(sql + " GROUP BY day", args)}
+
+
+def clear_focus() -> dict:
+    with tx() as conn:
+        return {"deleted": conn.execute("DELETE FROM focus_sessions").rowcount}
+
+
+def time_report(start=None, end=None) -> dict:
+    """Per project, for start..end (default: last 30 days): focus hours, and for items finished in
+    the range their estimate vs actual hours and cost."""
+    end_d = parse_date(end) if end else date.today()
+    start_d = parse_date(start) if start else end_d - timedelta(days=29)
+    a, b = start_d.isoformat(), end_d.isoformat()
+    rows: dict[str, dict] = {}
+    row = lambda slug: rows.setdefault(slug, {"project": slug, "focus_minutes": 0, "sessions": 0, "finished": 0,
+                                               "estimate_hours": 0.0, "actual_hours": 0.0, "cost": {},
+                                               # only items with both numbers, for a fair actual/estimate ratio
+                                               "paired": 0, "paired_estimate": 0.0, "paired_actual": 0.0})
+    with tx() as conn:
+        for slug, mins, n in conn.execute(
+            """SELECT COALESCE(p.slug, '(no item)'), SUM(f.minutes), COUNT(*) FROM focus_sessions f
+               LEFT JOIN projects p ON p.id = f.project_id WHERE f.day BETWEEN ? AND ? GROUP BY 1""", (a, b)):
+            r = row(slug)
+            r["focus_minutes"], r["sessions"] = mins, n
+        for it in conn.execute(
+            """SELECT p.slug, i.estimate_hours, i.actual_hours, i.cost, i.currency FROM items i JOIN projects p ON p.id = i.project_id
+               WHERE i.status = 'done' AND substr(i.completed_at, 1, 10) BETWEEN ? AND ?""", (a, b)):
+            r = row(it[0])
+            r["finished"] += 1
+            r["estimate_hours"] += it[1] or 0
+            r["actual_hours"] += it[2] or 0
+            if it[1] and it[2]:
+                r["paired"] += 1
+                r["paired_estimate"] += it[1]
+                r["paired_actual"] += it[2]
+            if it[3]:
+                cur = it[4] or DEFAULT_CURRENCY
+                r["cost"][cur] = r["cost"].get(cur, 0) + it[3]
+    out = sorted(rows.values(), key=lambda r: (-r["focus_minutes"], -r["actual_hours"], r["project"]))
+    return {"start": a, "end": b, "projects": out,
+            "focus_minutes": sum(r["focus_minutes"] for r in out),
+            "actual_hours": round(sum(r["actual_hours"] for r in out), 2)}
