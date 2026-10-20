@@ -78,14 +78,7 @@ sync git, back up, switch theme, filter a project), search items, or open one wi
 Typing a line also offers to create it, reading the extras out of it:
 
 ```
-Fix invoice PDF frub high due friday #bug
 ```
-
-That creates "Fix invoice PDF" in `frub`, priority high, due Friday, kind bug. It understands a
-project slug (or `@slug`), `urgent` / `high` / `low`, `submit|merge|deploy|due <date>` with the
-same dates as the API (`tomorrow`, `+3d`, `friday`, `next friday`, `2026-11-02`), `#bug`-style
-kinds and `for me`. **Shift Enter** creates it even when another result is selected.
-
 ## Focus and time
 
 The focus timer (the island at the top) saves every finished block to DevTrack, linked to an item
