@@ -1,7 +1,6 @@
 # DevTrack
 
-One place to track every app you build (frub, 3dzprinting, immorio, print-cost-calculator,
-bistro, ...): what each coding agent did, what's next, what's waiting on you, which branches
+One place to track every app you build: what each coding agent did, what's next, what's waiting on you, which branches
 were built early and need re-dating, and when things get submitted, merged and deployed, with
 estimates and cost.
 
@@ -98,7 +97,7 @@ them off hold. The Agenda lists everything on hold, grouped by who it waits on.
 
 Every 15 minutes DevTrack reads each open item's branch from your repos. They are mounted read-only
 from `DEVTRACK_REPOS_HOST` (default `D:/Work`); a project's `repo_path` must be inside it. Folders
-that hold several repos, like `frub/backend` and `frub/admin`, are searched one level down. Per item
+that hold several repos, are searched one level down. Per item
 it records:
 
 - commits ahead of and behind its base (the first word of `base_branch`, else the default branch)
