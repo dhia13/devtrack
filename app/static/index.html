@@ -648,7 +648,8 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line-st
 .dd[aria-expanded="true"] svg { transform: rotate(180deg); opacity: .9; }
 .dd[aria-expanded="true"], .dd:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
 .dd:disabled { opacity: .5; cursor: default; }
-.tools .dd { border: 0; background: transparent; padding: 6px 12px; font-weight: 600; font-size: 14px; max-width: 210px; border-radius: 999px; box-shadow: none; }
+/* not one of the round 36px icon buttons the toolbar's "button" rule describes */
+.tools .dd { width: auto; height: 36px; display: inline-flex; margin-left: 4px; border: 0; background: transparent; padding: 6px 12px; font-weight: 600; font-size: 14px; max-width: 210px; border-radius: 999px; box-shadow: none; }
 .tools .dd:hover, .tools .dd[aria-expanded="true"] { background: var(--hover); }
 .filterbar .dd { border: 0; background: transparent; border-radius: 999px; padding: 6px 12px; font-weight: 600; font-size: 13.5px; box-shadow: none; }
 .filterbar .dd:hover, .filterbar .dd[aria-expanded="true"] { background: var(--hover); }
