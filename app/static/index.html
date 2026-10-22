@@ -636,6 +636,46 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line-st
 .ck-it.on .ic { background: var(--accent); color: #fff; }
 .ck-foot { display: flex; gap: 14px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--faint); flex-wrap: wrap; }
 .ck-empty { padding: 26px; text-align: center; color: var(--muted); }
+
+/* ================= glass dropdowns (button + menu over a hidden native select) */
+.dd-native { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; border: 0 !important; opacity: 0 !important; pointer-events: none !important; overflow: hidden !important; }
+.dd { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; cursor: pointer; min-width: 0; max-width: 100%;
+  background: var(--glass-2); border: 1px solid var(--line-strong); border-radius: 10px; padding: 7px 10px; color: inherit; font: inherit; line-height: 1.35; }
+.dd .dd-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd svg { width: 14px; height: 14px; flex: none; opacity: .55; transition: transform .16s; }
+.dd:hover { border-color: var(--faint); }
+.dd:hover svg { opacity: .9; }
+.dd[aria-expanded="true"] svg { transform: rotate(180deg); opacity: .9; }
+.dd[aria-expanded="true"], .dd:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.dd:disabled { opacity: .5; cursor: default; }
+.tools .dd { border: 0; background: transparent; padding: 6px 12px; font-weight: 600; font-size: 14px; max-width: 210px; border-radius: 999px; box-shadow: none; }
+.tools .dd:hover, .tools .dd[aria-expanded="true"] { background: var(--hover); }
+.filterbar .dd { border: 0; background: transparent; border-radius: 999px; padding: 6px 12px; font-weight: 600; font-size: 13.5px; box-shadow: none; }
+.filterbar .dd:hover, .filterbar .dd[aria-expanded="true"] { background: var(--hover); }
+.prop .dd { width: 100%; border-color: transparent; background: transparent; padding: 5px 8px; font-size: 14px; }
+.prop .dd:hover { border-color: var(--line-strong); background: var(--glass-2); }
+.field .dd, .focus-ctl .dd { width: 100%; font-weight: 400; color: var(--text); }
+.panel-filters .dd, .bulk .dd, .composer .dd { padding: 4px 10px; font-size: 13px; border-radius: 999px; }
+.dd.status-select { font-weight: 650; color: var(--c) !important; }
+.dd-menu { position: fixed; inset: auto; margin: 0; padding: 5px; min-width: 180px; max-width: min(460px, calc(100vw - 16px)); overflow: auto; overscroll-behavior: contain; z-index: 90;
+  border-radius: 14px; border: 1px solid var(--glass-line); color: var(--text);
+  background: color-mix(in srgb, var(--glass-hi) 92%, transparent); backdrop-filter: blur(28px) saturate(1.6); -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  box-shadow: 0 1px 0 var(--glass-edge) inset, var(--shadow-lg); display: none; }
+.dd-menu:popover-open, .dd-menu.show { display: block; animation: ddIn .12s ease-out; }
+:root[data-solid] .dd-menu { background: var(--solid); backdrop-filter: none; }
+@keyframes ddIn { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
+.dd-menu, .ck-list { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.dd-menu::-webkit-scrollbar, .ck-list::-webkit-scrollbar { width: 8px; }
+.dd-menu::-webkit-scrollbar-thumb, .ck-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+.dd-menu::-webkit-scrollbar-button, .ck-list::-webkit-scrollbar-button { display: none; height: 0; }
+.dd-opt { display: flex; align-items: center; gap: 8px; padding: 7px 12px 7px 8px; border-radius: 9px; cursor: pointer; font-size: 14px; white-space: nowrap; }
+.dd-opt .tx { overflow: hidden; text-overflow: ellipsis; }
+.dd-opt .ck { width: 16px; height: 16px; flex: none; color: var(--accent); display: grid; place-items: center; }
+.dd-opt .ck svg { width: 14px; height: 14px; }
+.dd-opt .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--c, var(--faint)); }
+.dd-opt.act { background: var(--hover); }
+.dd-opt[aria-selected="true"] { font-weight: 650; }
+.dd-opt[aria-disabled="true"] { opacity: .45; cursor: default; }
 /* ================= hold, git, backups */
 .hold-quick { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 8px; }
 .hold-quick .chip { font-size: 12.5px; padding: 2px 10px; }
@@ -2210,6 +2250,159 @@ document.addEventListener("keydown", e => {
     if (cmdk.open) cmdk.close(); else if (!document.querySelector("dialog[open]")) openCmdk();
   }
 });
+
+
+// ---------- glass dropdowns
+// The open list of a native <select> is drawn by the OS and can't be styled, so on mouse/trackpad
+// devices each select gets a button + menu. The hidden native select stays the source of truth:
+// forms, change listeners and code that sets .value keep working, and the button follows it.
+// Touch devices keep the native picker.
+const DD_FINE = matchMedia("(hover: hover) and (pointer: fine)");
+const DD_CHEV = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+const DD_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>';
+const ddMenu = document.createElement("div");
+ddMenu.className = "dd-menu"; ddMenu.setAttribute("role", "listbox"); ddMenu.id = "ddMenu";
+if ("popover" in HTMLElement.prototype) ddMenu.popover = "manual"; // top layer: above dialogs, never clipped
+let dd = null; // { sel, btn, act }
+let ddType = "", ddTypeT;
+
+function ddLabelFor(sel) {
+  if (sel.getAttribute("aria-label")) return sel.getAttribute("aria-label");
+  const l = sel.closest("label");
+  return l ? l.textContent.replace(ddText(sel), "").trim() : "";
+}
+const ddText = sel => sel.selectedOptions[0]?.textContent ?? "";
+function ddSync(sel) {
+  const b = sel._dd; if (!b) return;
+  if (!sel.classList.contains("dd-native")) sel.classList.add("dd-native");
+  const cls = [...sel.classList].filter(c => c !== "dd-native").join(" ");
+  if (b.dataset.cls !== cls) { b.className = "dd " + cls; b.dataset.cls = cls; }
+  b.firstChild.textContent = ddText(sel) || " ";
+  b.disabled = sel.disabled; b.hidden = sel.hidden;
+  if (sel.style.cssText !== b.dataset.css) { b.style.cssText = sel.style.cssText; b.dataset.css = sel.style.cssText; }
+  if (dd?.sel === sel) ddBuild();
+}
+function ddEnhance(sel) {
+  if (sel._dd || sel.multiple || sel.hasAttribute("data-native") || !DD_FINE.matches) return;
+  const b = document.createElement("button");
+  b.type = "button"; b.innerHTML = `<span class="dd-t"></span>${DD_CHEV}`;
+  b.setAttribute("aria-haspopup", "listbox"); b.setAttribute("aria-expanded", "false");
+  b.setAttribute("aria-label", ddLabelFor(sel));
+  b._sel = sel; sel._dd = b; sel.tabIndex = -1;
+  sel.after(b); ddSync(sel);
+}
+function ddEnhanceAll(root = document) { $$("select", root).forEach(ddEnhance); }
+
+function ddBuild() {
+  const { sel } = dd, dots = sel.classList.contains("status-select") || ["fStatus"].includes(sel.id) || sel.dataset.bulkField === "status";
+  ddMenu.innerHTML = [...sel.options].map((o, i) => `<div class="dd-opt${i === dd.act ? " act" : ""}" role="option" id="ddo${i}" data-i="${i}"
+      aria-selected="${o.selected}" ${o.disabled ? 'aria-disabled="true"' : ""}>
+      <span class="ck">${o.selected ? DD_CHECK : ""}</span>${dots && o.value ? `<span class="dot s-${esc(o.value)}"></span>` : ""}<span class="tx">${esc(o.textContent)}</span></div>`).join("");
+  dd.btn.setAttribute("aria-activedescendant", "ddo" + dd.act);
+}
+function ddPlace() {
+  const r = dd.btn.getBoundingClientRect(), vh = innerHeight, vw = innerWidth;
+  ddMenu.style.minWidth = Math.max(r.width, 180) + "px";
+  ddMenu.style.maxHeight = "";
+  const mh = Math.min(ddMenu.scrollHeight + 2, 340), below = vh - r.bottom - 12, above = r.top - 12;
+  const up = mh > below && above > below;
+  ddMenu.style.maxHeight = Math.min(mh, up ? above : below) + "px";
+  ddMenu.style.top = (up ? r.top - 6 - Math.min(mh, above) : r.bottom + 6) + "px";
+  const w = ddMenu.offsetWidth;
+  ddMenu.style.left = Math.max(8, Math.min(r.left, vw - w - 8)) + "px";
+}
+function ddOpen(btn) {
+  if (dd) ddClose();
+  const sel = btn._sel;
+  dd = { sel, btn, act: Math.max(0, sel.selectedIndex) };
+  (btn.closest("dialog") || document.body).appendChild(ddMenu);
+  ddBuild();
+  ddMenu.popover ? ddMenu.showPopover() : (ddMenu.style.display = "block");
+  ddMenu.classList.add("show");
+  btn.setAttribute("aria-expanded", "true"); btn.setAttribute("aria-controls", "ddMenu");
+  ddPlace();
+  $("#ddo" + dd.act)?.scrollIntoView({ block: "nearest" });
+}
+function ddClose(focus = false) {
+  if (!dd) return;
+  const { btn } = dd; dd = null;
+  ddMenu.classList.remove("show");
+  if (ddMenu.popover) { try { ddMenu.hidePopover(); } catch {} } else ddMenu.style.display = "";
+  btn.setAttribute("aria-expanded", "false"); btn.removeAttribute("aria-activedescendant");
+  if (focus) btn.focus();
+}
+function ddPick(i) {
+  const { sel } = dd, o = sel.options[i];
+  if (!o || o.disabled) return;
+  const changed = sel.selectedIndex !== i;
+  ddClose(true);
+  if (!changed) return;
+  sel.selectedIndex = i; ddSync(sel);
+  sel.dispatchEvent(new Event("input", { bubbles: true }));
+  sel.dispatchEvent(new Event("change", { bubbles: true }));
+}
+function ddMove(to) {
+  const n = dd.sel.options.length; if (!n) return;
+  let i = Math.max(0, Math.min(n - 1, to)), guard = n;
+  while (dd.sel.options[i]?.disabled && guard--) i = (i + (to >= dd.act ? 1 : -1) + n) % n;
+  dd.act = i;
+  $$(".dd-opt", ddMenu).forEach((el, j) => el.classList.toggle("act", j === i));
+  dd.btn.setAttribute("aria-activedescendant", "ddo" + i);
+  $("#ddo" + i)?.scrollIntoView({ block: "nearest" });
+}
+
+document.addEventListener("click", e => {
+  const b = e.target.closest?.("button.dd");
+  if (b) { e.preventDefault(); e.stopPropagation(); return dd?.btn === b ? ddClose() : ddOpen(b); }
+  const o = e.target.closest?.(".dd-opt");
+  if (o && dd) { e.stopPropagation(); return ddPick(+o.dataset.i); }
+}, true);
+document.addEventListener("pointerdown", e => { if (dd && !e.target.closest?.(".dd-menu, button.dd")) ddClose(); }, true);
+ddMenu.addEventListener("pointermove", e => { const o = e.target.closest(".dd-opt"); if (o && +o.dataset.i !== dd?.act) ddMove(+o.dataset.i); });
+addEventListener("resize", () => ddClose());
+document.addEventListener("scroll", e => { if (dd && !ddMenu.contains(e.target)) ddClose(); }, true);
+document.addEventListener("keydown", e => {
+  const b = e.target.closest?.("button.dd");
+  if (!dd) {
+    if (b && ["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) { e.preventDefault(); ddOpen(b); }
+    return;
+  }
+  const k = e.key, page = 8;
+  const keys = { ArrowDown: () => ddMove(dd.act + 1), ArrowUp: () => ddMove(dd.act - 1), Home: () => ddMove(0), End: () => ddMove(dd.sel.options.length - 1),
+    PageDown: () => ddMove(dd.act + page), PageUp: () => ddMove(dd.act - page), Enter: () => ddPick(dd.act), " ": () => ddPick(dd.act), Escape: () => ddClose(true), Tab: () => ddClose() };
+  if (keys[k]) {
+    if (k !== "Tab") { e.preventDefault(); e.stopPropagation(); } // Esc closes the menu, not the dialog
+    return keys[k]();
+  }
+  if (k.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { // type to jump
+    e.preventDefault(); e.stopPropagation();
+    ddType += k.toLowerCase(); clearTimeout(ddTypeT); ddTypeT = setTimeout(() => ddType = "", 600);
+    const opts = [...dd.sel.options], n = opts.length;
+    for (let s = 1; s <= n; s++) { const i = (dd.act + (ddType.length > 1 ? 0 : s)) % n; if (opts[i].textContent.trim().toLowerCase().startsWith(ddType)) return ddMove(i); }
+  }
+}, true);
+// Esc on an open menu inside a dialog must not close the dialog
+document.addEventListener("cancel", e => { if (dd) { e.preventDefault(); ddClose(true); } }, true);
+
+// Follow the native select when code changes it
+for (const prop of ["value", "selectedIndex"]) {
+  const d = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, prop);
+  Object.defineProperty(HTMLSelectElement.prototype, prop, { configurable: true, enumerable: d.enumerable,
+    get() { return d.get.call(this); }, set(v) { d.set.call(this, v); if (this._dd) ddSync(this); } });
+}
+document.addEventListener("reset", e => setTimeout(() => $$("select", e.target).forEach(ddSync)), true);
+document.addEventListener("change", e => { if (e.target._dd) ddSync(e.target); }, true);
+new MutationObserver(muts => {
+  const touched = new Set();
+  for (const m of muts) {
+    if (m.type === "attributes") { if (m.target.tagName === "SELECT") touched.add(m.target); continue; }
+    const host = m.target.closest?.("select"); if (host) { touched.add(host); continue; }
+    m.addedNodes.forEach(n => { if (n.nodeType !== 1) return; if (n.tagName === "SELECT") ddEnhance(n); else if (n.querySelector?.("select")) ddEnhanceAll(n); });
+    m.removedNodes.forEach(n => { if (n === ddMenu || !dd) return; if (n.nodeType === 1 && (n === dd.sel || n.contains?.(dd.sel))) ddClose(); });
+  }
+  touched.forEach(sel => sel._dd ? ddSync(sel) : ddEnhance(sel));
+}).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "hidden", "disabled", "style"] });
+ddEnhanceAll();
 
 // ---------- wiring
 mountEditors(document);
