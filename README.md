@@ -70,6 +70,7 @@ Dates accept `YYYY-MM-DD`, `today`, `tomorrow`, `+3d`, `friday`, `next friday`.
 | `redate_plan` | Script that rebases a parked branch and spreads its commit dates over the submit day |
 | `git_sync` | Refresh branch and MR state now instead of at the next 15-minute run |
 | `time_report` | Focus hours per project, and estimate vs actual for items finished in a date range |
+| `weekly_review` | One week's finished, started and slipped work, decisions, hours, and next week, with a Markdown summary |
 | `list_templates`, `create_from_template` | Reusable checklists: create a "Release" or "Store submission" item in one call |
 
 ## Re-dating a branch built early
@@ -101,6 +102,15 @@ The focus timer (the island at the top) saves every finished block to DevTrack, 
 when you start it from one. Ending a block also offers to add its minutes to the item's actual
 hours. **Insights → Time by project** shows focus hours per project for the chosen range, and, for
 items finished in it, estimate vs actual hours and cost, with a CSV download (`/api/time.csv`).
+
+## Weekly review
+
+**Weekly review** (key `7`) shows one Monday-to-Sunday week: what was finished (and which of it
+late), what was started, milestones that passed without being reached, decisions and blockers
+noted, focus hours, actual vs estimate hours, and what is due the week after. Step back a week
+with the arrows. **Copy summary** puts a Markdown version on the clipboard for a client update or
+a stand-up, and **Download .md** saves it (`/api/review.md`). Agents call `weekly_review`, which
+returns the same data with the Markdown in `markdown`.
 
 ## Dependencies
 

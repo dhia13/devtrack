@@ -920,3 +920,75 @@ def time_report(start=None, end=None) -> dict:
     return {"start": a, "end": b, "projects": out,
             "focus_minutes": sum(r["focus_minutes"] for r in out),
             "actual_hours": round(sum(r["actual_hours"] for r in out), 2)}
+
+
+def weekly_review(day=None, project=None) -> dict:
+    """Monday to Sunday of the week holding `day` (default: this week): what was finished, what
+    slipped, what started, focus and hours, decisions, and what is due the week after."""
+    d = parse_date(day) if day else date.today()
+    start = d - timedelta(days=d.weekday())
+    end = start + timedelta(days=6)
+    a, b, today = start.isoformat(), end.isoformat(), date.today().isoformat()
+    items = list_items(project=project, include_closed=True, limit=100_000)
+    finished = [i for i in items if i["status"] == "done" and a <= (i["completed_at"] or "")[:10] <= b]
+    created = [i for i in items if a <= i["created_at"][:10] <= b]
+    na, nb = (end + timedelta(days=1)).isoformat(), (end + timedelta(days=7)).isoformat()
+    slipped, coming = [], []
+    for it in items:
+        if it["status"] == "cancelled":
+            continue
+        for kind, field, reached in MILESTONES:
+            when = it[field]
+            if not when or RANK[it["status"]] >= reached:
+                continue
+            if a <= when <= b and when < today:
+                slipped.append({"date": when, "type": kind, "item": _compact(it)})
+            elif na <= when <= nb:
+                coming.append({"date": when, "type": kind, "item": _compact(it)})
+    slipped.sort(key=lambda e: e["date"])
+    coming.sort(key=lambda e: (e["date"], e["type"]))
+    late = [i for i in finished if i["due_on"] and i["completed_at"][:10] > i["due_on"]]
+    with tx() as conn:
+        pid = _get_project(conn, project)["id"] if project else None
+        pf = " AND project_id = ?" if pid else ""
+        args = (a, b, *((pid,) if pid else ()))
+        focus = conn.execute(f"SELECT COALESCE(SUM(minutes), 0) FROM focus_sessions WHERE day BETWEEN ? AND ?{pf}", args).fetchone()[0]
+        notes = [dict(r) for r in conn.execute(
+            f"""SELECT n.id, n.kind, n.body, n.item_id, n.created_at, p.slug AS project FROM notes n JOIN projects p ON p.id = n.project_id
+                WHERE n.kind IN ('decision', 'blocker') AND substr(n.created_at, 1, 10) BETWEEN ? AND ?{pf.replace('project_id', 'n.project_id')}
+                ORDER BY n.created_at""", args)]
+    by_project: dict[str, dict] = {}
+    for key, group in (("finished", finished), ("created", created)):
+        for it in group:
+            by_project.setdefault(it["project"], {"project": it["project"], "finished": 0, "created": 0})[key] += 1
+    est = sum(i["estimate_hours"] or 0 for i in finished)
+    act = sum(i["actual_hours"] or 0 for i in finished)
+    review = {
+        "week": f"{start.isocalendar()[0]}-W{start.isocalendar()[1]:02d}", "start": a, "end": b,
+        "finished": [_compact(i) for i in finished], "created": [_compact(i) for i in created],
+        "slipped": slipped, "finished_late": [_compact(i) for i in late],
+        "decisions": notes, "focus_minutes": focus,
+        "estimate_hours": round(est, 2), "actual_hours": round(act, 2),
+        "by_project": sorted(by_project.values(), key=lambda r: (-r["finished"], r["project"])),
+        "next_week": coming,
+        "still_open": {"blocked": sum(i["status"] == "blocked" for i in items),
+                       "waiting_on_me": sum(i["assignee"] == "me" and i["status"] not in CLOSED and not i["on_hold"] for i in items)},
+    }
+    review["markdown"] = _review_markdown(review)
+    return review
+
+
+def _review_markdown(r: dict) -> str:
+    line = lambda it: f"- #{it['id']} {it['title']} ({it['project']})"
+    out = [f"# Week {r['week']} ({r['start']} to {r['end']})", "",
+           f"{len(r['finished'])} finished, {len(r['created'])} started, {len(r['slipped'])} slipped. "
+           f"Focus {r['focus_minutes'] / 60:.1f}h." + (f" Actual {r['actual_hours']:g}h against an estimate of {r['estimate_hours']:g}h."
+                                                       if r["estimate_hours"] else "")]
+    sections = (("Finished", [line(i) for i in r["finished"]]),
+                ("Slipped", [f"- {e['type']} {e['date']}: #{e['item']['id']} {e['item']['title']} ({e['item']['project']})" for e in r["slipped"]]),
+                ("Decisions and blockers", [f"- {n['kind']}: {n['body'].splitlines()[0]} ({n['project']})" for n in r["decisions"]]),
+                ("Next week", [f"- {e['type']} {e['date']}: #{e['item']['id']} {e['item']['title']} ({e['item']['project']})" for e in r["next_week"]]))
+    for title, rows in sections:
+        if rows:
+            out += ["", f"## {title}", *rows]
+    return "\n".join(out) + "\n"

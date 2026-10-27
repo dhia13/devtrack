@@ -20,7 +20,7 @@ sync_api = pytest.importorskip("playwright.sync_api")
 pytestmark = pytest.mark.e2e
 
 ROOT = Path(__file__).resolve().parents[2]
-VIEWS = ("home", "tasks", "agenda", "calendar", "projects", "insights", "activity", "settings")
+VIEWS = ("home", "tasks", "agenda", "calendar", "projects", "insights", "review", "activity", "settings")
 
 
 def _free_port() -> int:
@@ -52,9 +52,9 @@ def server(tmp_path_factory):
     proc.wait(10)
 
 
-def _api(base, path, body=None):
+def _api(base, path, body=None, method=None):
     req = urllib.request.Request(base + path, data=json.dumps(body).encode() if body else None,
-                                 headers={"Content-Type": "application/json"})
+                                 headers={"Content-Type": "application/json"}, method=method)
     with urllib.request.urlopen(req) as r:
         return json.load(r)
 
@@ -151,4 +151,17 @@ def test_template_from_the_command_bar(server, page):
     page.locator("#sect-templates .bk", has_text="Hotfix").wait_for()
     hotfix = next(t for t in _api(server, "/api/templates") if t["name"] == "Hotfix")
     assert hotfix["description"] == "- [ ] Reproduce\n- [ ] Fix"
+    assert page.errors == []
+
+
+def test_weekly_review_lists_this_weeks_work(server, page):
+    it = _api(server, "/api/items", {"project": "demo", "title": "Finished for the review"})
+    _api(server, f"/api/items/{it['id']}", {"status": "done"}, method="PATCH")
+    page.reload()
+    page.click('#nav button[data-view="review"]')
+    page.locator(".panel", has_text="Marked done this week").get_by_text("Finished for the review").wait_for()
+    page.click("[data-rv='-1']")
+    page.get_by_text("Nothing finished this week.").wait_for()
+    page.click("[data-rv='0']")
+    page.get_by_text("Finished for the review").first.wait_for()
     assert page.errors == []

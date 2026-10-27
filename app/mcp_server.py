@@ -250,6 +250,14 @@ def agenda(days: int = 7, project: str | None = None) -> dict:
 
 
 @mcp.tool()
+def weekly_review(day: str | None = None, project: str | None = None) -> dict:
+    """The week (Monday to Sunday) holding `day`, default this week: items finished, started and
+    slipped, finished late, decisions and blockers noted, focus and actual vs estimate hours, and
+    what is due the next week. `markdown` is a ready summary to show the developer."""
+    return s.weekly_review(day, project)
+
+
+@mcp.tool()
 def cost_summary(project: str | None = None) -> dict:
     """Estimate hours, actual hours and costs (open vs done) per project."""
     return s.cost_summary(project)

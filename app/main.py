@@ -251,6 +251,18 @@ def agenda(days: int = 14, project: str | None = None):
     return s.agenda(days, project)
 
 
+@app.get("/api/review")
+def review(day: str | None = None, project: str | None = None):
+    return s.weekly_review(day, project)
+
+
+@app.get("/api/review.md")
+def review_md(day: str | None = None, project: str | None = None):
+    r = s.weekly_review(day, project)
+    return Response(r["markdown"], media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="devtrack-{r["week"]}.md"'})
+
+
 @app.get("/api/costs")
 def costs(project: str | None = None):
     return s.cost_summary(project)

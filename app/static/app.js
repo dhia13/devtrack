@@ -2,11 +2,11 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const VIEWS = ["home", "tasks", "agenda", "calendar", "projects", "insights", "activity", "settings"];
+const VIEWS = ["home", "tasks", "agenda", "calendar", "projects", "insights", "review", "activity", "settings"];
 const state = { view: "home", meta: null, projects: [], templates: [], selected: new Set(), expanded: {}, meProject: "",
   tl: { project: "", status: "", type: "" },
   cal: { mode: "month", anchor: null, types: { submit: true, merge: true, deploy: true, due: true }, done: true },
-  tasks: { mode: "board", mine: false, priority: "" }, ins: { range: 30 },
+  tasks: { mode: "board", mine: false, priority: "" }, ins: { range: 30 }, review: { day: "" },
   filters: { status: "", assignee: "", search: "", closed: false } };
 try { const s = JSON.parse(localStorage.getItem("devtrack-ui") || "{}"); state.view = VIEWS.includes(s.view) ? s.view : s.view === "items" ? "tasks" : "home"; Object.assign(state.filters, s.filters || {}); state.project = s.project; state.meProject = s.meProject || ""; Object.assign(state.tl, s.tl || {}); Object.assign(state.tasks, s.tasks || {}); Object.assign(state.ins, s.ins || {}); if (s.cal) { state.cal.mode = s.cal.mode || "month"; Object.assign(state.cal.types, s.cal.types || {}); state.cal.done = s.cal.done ?? true; } } catch {}
 const persist = () => { try { localStorage.setItem("devtrack-ui", JSON.stringify({ view: state.view, filters: state.filters, project: projectFilter.value, meProject: state.meProject, tl: state.tl, tasks: state.tasks, ins: state.ins, cal: { mode: state.cal.mode, types: state.cal.types, done: state.cal.done } })); } catch {} };
@@ -782,7 +782,7 @@ const views = {
             </form>
           </section>
           <section class="panel" id="sect-keys"><div class="panel-h"><h3>Shortcuts</h3></div>
-            <div class="keys">${[["Command bar", "Ctrl K"], ["New item", "N"], ["Filter tasks", "/"], ["Switch view", "1 – 8"], ["Start or pause focus", "F"], ["Calendar: move", "← →"], ["Calendar: today", "T"], ["Save item", "Ctrl Enter"], ["Close dialog", "Esc"]]
+            <div class="keys">${[["Command bar", "Ctrl K"], ["New item", "N"], ["Filter tasks", "/"], ["Switch view", "1 – 9"], ["Start or pause focus", "F"], ["Calendar: move", "← →"], ["Calendar: today", "T"], ["Save item", "Ctrl Enter"], ["Close dialog", "Esc"]]
               .map(([a, k]) => `<div><span>${a}</span><span>${k.split(" ").map(x => `<kbd>${x}</kbd>`).join(" ")}</span></div>`).join("")}</div></section>
         </div>
       </div>`;
@@ -999,6 +999,42 @@ const views = {
         <tbody>${costs.projects.map(c => `<tr data-filter-project="${esc(c.project)}"><td class="proj">${esc(c.project)}</td><td class="num">${c.items}</td>
           <td class="num">${hours(c.open_estimate_hours)}</td><td class="num">${hours(c.actual_hours)}</td>
           <td class="num">${fmtCost(c.cost_open)}</td><td class="num">${fmtCost(c.cost_done)}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">No items yet.</td></tr>`}</tbody></table></div>`;
+  },
+
+  async review() {
+    const p = projectFilter.value, rv = state.review;
+    const r = await api(`/api/review?${new URLSearchParams({ ...(rv.day && { day: rv.day }), ...(p && { project: p }) })}`);
+    state.reviewMd = r.markdown;
+    const thisWeek = !rv.day || r.start <= todayISO() && todayISO() <= r.end;
+    const row = (it, extra = "") => `<div class="row" data-item="${it.id}"><span class="t"><span class="title">${esc(it.title)}</span>
+        <span class="sub"><span class="proj">${esc(it.project)}</span>${extra}${it.assignee === "me" ? `<span>for you</span>` : ""}</span></span><span class="right">${statusChip(it.status)}</span></div>`;
+    const ev = e => row(e.item, `<span class="ev ${e.type}">${e.type}</span><span>${fmtDate(e.date, { weekday: "short", day: "numeric", month: "short" })}</span>`);
+    const panel = (title, sub, body, empty) => `<div class="panel"><div class="panel-h"><div><h3>${title}</h3>${sub ? `<span class="sub">${sub}</span>` : ""}</div></div>${body || `<div class="empty">${empty}</div>`}</div>`;
+    const late = new Set(r.finished_late.map(i => i.id));
+    const fmtRange = `${fmtDate(r.start, { day: "numeric", month: "short" })} – ${fmtDate(r.end, { day: "numeric", month: "short" })}`;
+    const acts = `<div class="pills" role="group" aria-label="Week"><button type="button" data-rv="-1" aria-label="Previous week">‹</button><button type="button" data-rv="0" class="${thisWeek ? "on" : ""}">This week</button><button type="button" data-rv="1" aria-label="Next week" ${thisWeek ? "disabled" : ""}>›</button></div>
+      <button class="btn" data-rv-copy>Copy summary</button><a class="btn" href="/api/review.md?${new URLSearchParams({ day: r.start, ...(p && { project: p }) })}" download>Download .md</a>`;
+    return pageH("Weekly review", `Week ${+r.week.slice(6)}, ${r.week.slice(0, 4)} · ${fmtRange}${p ? ` · ${esc(p)}` : ""}`, acts) + `
+      <div class="tiles">
+        ${tile("Finished", r.finished.length, r.finished_late.length ? `<small> · ${r.finished_late.length} late</small>` : "")}
+        ${tile("Started", r.created.length)}
+        ${tile("Slipped", r.slipped.length, "", r.slipped.length ? "alert" : "")}
+        ${tile("Focus", (r.focus_minutes / 60).toFixed(1) + "<small>h</small>")}
+        ${tile("Actual vs estimate", r.estimate_hours ? `${hours(r.actual_hours) || "0h"}<small> / ${hours(r.estimate_hours)}</small>` : "–")}
+      </div>
+      <div class="cols">
+        <div class="stack">
+          ${panel("Finished", "Marked done this week", r.finished.map(it => row(it, `${late.has(it.id) ? `<span class="late">late, due ${fmtDate(it.due_on)}</span>` : ""}${it.actual_hours ? `<span>${hours(it.actual_hours)}</span>` : ""}`)).join(""), "Nothing finished this week.")}
+          ${panel("Slipped", "Milestones this week that passed without being reached", r.slipped.map(ev).join(""), "Nothing slipped.")}
+          ${panel("Started", "Items created this week", r.created.map(it => row(it)).join(""), "No new items.")}
+        </div>
+        <div class="stack">
+          ${panel("Next week", fmtDate(toISO(addDays(parseISO(r.end), 1)), { day: "numeric", month: "short" }) + " – " + fmtDate(toISO(addDays(parseISO(r.end), 7)), { day: "numeric", month: "short" }), r.next_week.map(ev).join(""), "Nothing scheduled.")}
+          ${panel("Decisions and blockers", "Notes of those kinds this week", r.decisions.map(n => `<div class="row"><span class="t"><span class="title">${esc(n.body.split("\n")[0])}</span><span class="sub"><span class="proj">${esc(n.project)}</span><span class="tag">${n.kind}</span>${n.item_id ? `<span>#${n.item_id}</span>` : ""}</span></span></div>`).join(""), "None noted.")}
+          ${panel("By project", "", r.by_project.map(x => `<div class="row" data-filter-project="${esc(x.project)}"><span class="t">${pchip(x.project)}</span><span class="right muted">${x.finished} finished · ${x.created} started</span></div>`).join(""), "No activity.")}
+          ${panel("Still open", "", `<div class="row"><span class="t">Blocked</span><span class="right"><b>${r.still_open.blocked}</b></span></div><div class="row" data-goto="agenda"><span class="t">Waiting on you</span><span class="right"><b>${r.still_open.waiting_on_me}</b></span></div>`, "")}
+        </div>
+      </div>`;
   },
 
   async activity() {
@@ -1263,7 +1299,7 @@ const ICON = {
   proj: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
 };
 const ic = k => `<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg></span>`;
-const VIEW_NAMES = { home: "Home", tasks: "Tasks", agenda: "Agenda", calendar: "Calendar", projects: "Projects", insights: "Insights", activity: "Activity", settings: "Settings" };
+const VIEW_NAMES = { home: "Home", tasks: "Tasks", agenda: "Agenda", calendar: "Calendar", projects: "Projects", insights: "Insights", review: "Weekly review", activity: "Activity", settings: "Settings" };
 const DATE_WORD = /^(today|tomorrow|\+\d+d|\d{4}-\d{2}-\d{2}|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i;
 // "Fix invoice PDF frub high due friday #bug" -> title + {project, priority, due_on, kind}
 function parseQuick(text) {
@@ -1636,6 +1672,13 @@ $("#view").addEventListener("click", async e => {
     catch (err) { toast(err.message); }
     return render();
   }
+  const rvb = t.closest("[data-rv]"); if (rvb) {
+    const n = +rvb.dataset.rv, base = parseISO(state.review.day || todayISO());
+    state.review.day = n === 0 ? "" : toISO(addDays(base, 7 * n));
+    if (state.review.day && state.review.day >= todayISO()) state.review.day = "";
+    return render();
+  }
+  if (t.closest("[data-rv-copy]")) return navigator.clipboard.writeText(state.reviewMd || "").then(() => toast("Summary copied as Markdown"), () => toast("Couldn't copy here; use Download .md"));
   const tu = t.closest("[data-tpl-use]"); if (tu) return useTemplate(state.templates.find(x => x.id === +tu.dataset.tplUse));
   const td = t.closest("[data-tpl-del]"); if (td) {
     if (!(await ask(`Delete the ${td.dataset.name} template?`, "Items already made from it stay as they are.", { ok: "Delete", danger: true }))) return;
@@ -1773,7 +1816,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "n") { e.preventDefault(); openItem(null); }
   else if (e.key === "/") { e.preventDefault(); goSearch(); }
   else if (e.key === "f") { if (focusS) focusAction("pause"); else startFocus(); }
-  else if (/^[1-8]$/.test(e.key)) { state.view = VIEWS[+e.key - 1]; render(); }
+  else if (/^[1-9]$/.test(e.key)) { state.view = VIEWS[+e.key - 1]; render(); }
   else if (state.view === "calendar" && (e.key === "ArrowLeft" || e.key === "ArrowRight")) $(`[data-cal-nav="${e.key === "ArrowLeft" ? -1 : 1}"]`)?.click();
   else if (state.view === "calendar" && e.key === "t") $('[data-cal-nav="0"]')?.click();
 });
