@@ -70,6 +70,7 @@ Dates accept `YYYY-MM-DD`, `today`, `tomorrow`, `+3d`, `friday`, `next friday`.
 | `redate_plan` | Script that rebases a parked branch and spreads its commit dates over the submit day |
 | `git_sync` | Refresh branch and MR state now instead of at the next 15-minute run |
 | `time_report` | Focus hours per project, and estimate vs actual for items finished in a date range |
+| `list_templates`, `create_from_template` | Reusable checklists: create a "Release" or "Store submission" item in one call |
 
 ## Re-dating a branch built early
 
@@ -108,6 +109,16 @@ waits on. An open item with an unfinished blocker moves to `blocked`, with a not
 blocker is merged, deployed, done or cancelled (or deleted), it moves back to `todo` by itself,
 with a note naming the blocker, and the finishing call returns `unblocked` with its number. An
 item you moved on by hand (say to `in_progress`) is left alone. Cycles are refused.
+
+## Templates
+
+A template is a starting point for an item you make often: its title, checklist, kind, priority,
+assignee and estimate. Type its name in the command bar (**Ctrl K**, say `release`) and pick it
+under **Templates** to open a new item with all of that filled in. **Save as template** in the item
+dialog saves the open item under its title (replacing a template of that name), and
+**Settings → Templates** lists, adds and deletes them. Three starters come with a new database:
+Release, New project setup and Store submission. Agents use `list_templates` and
+`create_from_template`, and the API is `/api/templates`.
 
 ## Recurring items
 

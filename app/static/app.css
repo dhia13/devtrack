@@ -702,6 +702,9 @@ a.gb { text-decoration: none; }
 .hgroup { padding: 4px 18px 6px; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); display: flex; gap: 8px; }
 #holdDlg { width: min(480px, calc(100vw - 32px)); }
 .bk { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 18px; border-top: 1px solid var(--line); font-size: 13.5px; }
+.tpl-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px 18px 16px; border-top: 1px solid var(--line); }
+.tpl-form textarea { grid-column: 1 / -1; resize: vertical; }
+.tpl-form button { justify-self: start; }
 .bk b { font-weight: 650; font-variant-numeric: tabular-nums; }
 .bk small { color: var(--muted); display: block; font-size: 12.5px; }
 .bk .acts { display: flex; gap: 6px; }

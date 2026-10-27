@@ -508,6 +508,63 @@ def delete_item(item_id: int) -> None:
                 _insert_note(conn, dep["project_id"], f"Unblocked: #{item_id} was deleted.", "info", dep_id, "devtrack")
 
 
+# ---------------------------------------------------------------- templates
+
+TEMPLATE_FIELDS = ("title", "description", "kind", "priority", "assignee", "estimate_hours")
+
+
+def list_templates() -> list[dict]:
+    with tx() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM templates ORDER BY name COLLATE NOCASE")]
+
+
+def _get_template(conn, ref) -> dict:
+    ref = str(ref).strip()
+    row = conn.execute("SELECT * FROM templates WHERE id = ? OR name = ? COLLATE NOCASE",
+                       (int(ref) if ref.isdigit() else -1, ref)).fetchone()
+    if not row:
+        raise NotFound(f"template {ref!r} not found")
+    return dict(row)
+
+
+def save_template(name: str, **fields) -> dict:
+    """Create the template called `name`, or update it if it exists."""
+    name = (name or "").strip()
+    if not name:
+        raise Invalid("template name is required")
+    unknown = set(fields) - set(TEMPLATE_FIELDS)
+    if unknown:
+        raise Invalid(f"unknown template field(s): {', '.join(sorted(unknown))}")
+    clean = _clean_item(fields)
+    ts = now()
+    with tx() as conn:
+        row = conn.execute("SELECT id FROM templates WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
+        if row:
+            if clean:
+                conn.execute(f"UPDATE templates SET {', '.join(f'{k} = ?' for k in clean)}, updated_at = ? WHERE id = ?",
+                             (*clean.values(), ts, row[0]))
+            return _get_template(conn, row[0])
+        clean.setdefault("title", name)
+        cols = ["name", *clean, "created_at", "updated_at"]
+        cur = conn.execute(f"INSERT INTO templates ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                           (name, *clean.values(), ts, ts))
+        return _get_template(conn, cur.lastrowid)
+
+
+def delete_template(ref) -> None:
+    with tx() as conn:
+        conn.execute("DELETE FROM templates WHERE id = ?", (_get_template(conn, ref)["id"],))
+
+
+def create_from_template(template, project, title: str | None = None, **fields) -> dict:
+    """A new item with the template's title, checklist, kind, priority, assignee and estimate.
+    Anything in `fields` (dates, branch, ...) is set on top."""
+    with tx() as conn:
+        t = _get_template(conn, template)
+    base = {k: t[k] for k in TEMPLATE_FIELDS if t[k] is not None and k != "title"}
+    return create_item(project, (title or "").strip() or t["title"], **{**base, **fields})
+
+
 # ---------------------------------------------------------------- notes
 
 def _insert_note(conn, project_id, body, kind="progress", item_id=None, author=None) -> int:
@@ -723,6 +780,7 @@ def export_all() -> dict:
             "notes": [dict(r) for r in conn.execute("SELECT * FROM notes ORDER BY id")],
             "focus_sessions": [dict(r) for r in conn.execute("SELECT * FROM focus_sessions ORDER BY id")],
             "item_deps": [dict(r) for r in conn.execute("SELECT * FROM item_deps ORDER BY item_id, blocked_by")],
+            "templates": [dict(r) for r in conn.execute("SELECT * FROM templates ORDER BY id")],
         }
 
 

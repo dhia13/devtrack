@@ -181,6 +181,29 @@ def update_item(
 
 
 @mcp.tool()
+def list_templates() -> list[dict]:
+    """Reusable item templates (name, title, checklist description, kind, priority, assignee,
+    estimate). Use one with `create_from_template` instead of typing a familiar checklist again."""
+    return s.list_templates()
+
+
+@mcp.tool()
+def create_from_template(
+    template: str,
+    project: str,
+    title: str | None = None,
+    due_on: str | None = None,
+    submit_on: str | None = None,
+    branch: str | None = None,
+    assignee: Assignee | None = None,
+) -> dict:
+    """Create an item from a template (by name or id). It takes the template's title unless
+    `title` is given, and its checklist, kind, priority, assignee and estimate."""
+    return s.create_from_template(template, project, title,
+                                  **_given(due_on=due_on, submit_on=submit_on, branch=branch, assignee=assignee))
+
+
+@mcp.tool()
 def add_note(
     body: str,
     project: str | None = None,

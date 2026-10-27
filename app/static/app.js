@@ -3,7 +3,7 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const VIEWS = ["home", "tasks", "agenda", "calendar", "projects", "insights", "activity", "settings"];
-const state = { view: "home", meta: null, projects: [], selected: new Set(), expanded: {}, meProject: "",
+const state = { view: "home", meta: null, projects: [], templates: [], selected: new Set(), expanded: {}, meProject: "",
   tl: { project: "", status: "", type: "" },
   cal: { mode: "month", anchor: null, types: { submit: true, merge: true, deploy: true, due: true }, done: true },
   tasks: { mode: "board", mine: false, priority: "" }, ins: { range: 30 },
@@ -705,7 +705,10 @@ const views = {
     const ico = (c, p) => `<span class="ico" style="--c:${c}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${p}</svg></span>`;
     const IC = { look: '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><path d="M12 2a10 10 0 0 0 0 20c1 0 1.6-.8 1.6-1.7 0-.5-.2-.8-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.6 1.7-1.6H16a6 6 0 0 0 6-6c0-4.9-4.5-8.3-10-8.3z"/>',
       focus: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/>', data: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>', keys: '<rect x="2" y="6" width="20" height="13" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 15h10"/>',
-      git: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 5-8 3-12 7"/>' };
+      git: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 5-8 3-12 7"/>',
+      tpl: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>' };
+    await loadTemplates();
+    const tpls = state.templates;
     const kb = n => n > 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.round(n / 1e3) + " KB";
     const last = bk.backups.find(b => b.reason !== "pre-restore");
     const okLine = (ok, yes, no) => `<span class="${ok ? "okdot" : "nodot"}"></span>${ok ? yes : no}`;
@@ -720,6 +723,7 @@ const views = {
           <button data-sect="backups">${ico("#e5484d", IC.data)}Backups</button>
           <button data-sect="git">${ico("#6b5ae0", IC.git)}Git sync</button>
           <button data-sect="data">${ico("#22b37a", IC.data)}Data</button>
+          <button data-sect="templates">${ico("#0fa5a5", IC.tpl)}Templates</button>
           <button data-sect="keys">${ico("#4c7dff", IC.keys)}Shortcuts</button>
         </nav>
         <div class="stack">
@@ -765,6 +769,17 @@ const views = {
             <div class="set-row"><span class="t"><b>API</b><small>REST docs; agents use the MCP endpoint at <span class="mono">/mcp</span></small></span><a class="btn" href="/api/docs" target="_blank" rel="noopener">Open docs</a></div>
             <div class="set-row"><span class="t"><b>Focus history</b><small>${days ? `${days} day${days === 1 ? "" : "s"} of focus sessions, saved in DevTrack` : "No focus sessions logged yet"}</small></span>
               <button class="btn danger" data-clear-focus ${days ? "" : "disabled"}>Clear</button></div>
+          </section>
+          <section class="panel" id="sect-templates"><div class="panel-h"><div><h3>Templates</h3><span class="sub">Start an item with its checklist filled in. Pick one from the command bar (Ctrl K), or use Save as template in an item.</span></div></div>
+            ${tpls.map(x => `<div class="bk"><span><b>${esc(x.name)}</b> <span class="tag">${esc(x.kind)}</span>${x.assignee === "me" ? ` <span class="tag">for you</span>` : ""}
+                <small>${esc(x.title)}${tplSteps(x.description) ? ` · ${tplSteps(x.description)} steps` : ""}${x.estimate_hours ? ` · ${x.estimate_hours}h` : ""}</small></span>
+              <span class="acts"><button class="btn sm" data-tpl-use="${x.id}">Use</button><button class="btn sm ghost danger" data-tpl-del="${x.id}" data-name="${esc(x.name)}">Delete</button></span></div>`).join("") || `<div class="empty">No templates yet.</div>`}
+            <form id="tplForm" class="tpl-form" autocomplete="off">
+              <input name="name" placeholder="Template name, e.g. Hotfix" aria-label="Template name" required maxlength="80">
+              <select name="kind" aria-label="Kind">${state.meta.kinds.map(k => `<option ${k === "task" ? "selected" : ""}>${k}</option>`).join("")}</select>
+              <textarea name="steps" rows="3" placeholder="One step per line" aria-label="Steps"></textarea>
+              <button type="submit" class="btn primary sm">Add template</button>
+            </form>
           </section>
           <section class="panel" id="sect-keys"><div class="panel-h"><h3>Shortcuts</h3></div>
             <div class="keys">${[["Command bar", "Ctrl K"], ["New item", "N"], ["Filter tasks", "/"], ["Switch view", "1 – 8"], ["Start or pause focus", "F"], ["Calendar: move", "← →"], ["Calendar: today", "T"], ["Save item", "Ctrl Enter"], ["Close dialog", "Esc"]]
@@ -1038,6 +1053,16 @@ async function render() {
   paintFocus(); persist();
 }
 
+async function loadTemplates() {
+  state.templates = await api("/api/templates").catch(() => []);
+}
+const TPL_KEYS = ["title", "description", "kind", "priority", "assignee", "estimate_hours"];
+const tplSteps = d => (String(d || "").match(/^\s*[-*+]\s+\[[ xX]\]/gm) || []).length;
+function useTemplate(tpl) {
+  const preset = {};
+  TPL_KEYS.forEach(k => { if (tpl[k] != null) preset[k] = tpl[k]; });
+  return openItem(null, preset);
+}
 async function loadProjects() {
   state.projects = await api("/api/projects?include_archived=true");
   const cur = projectFilter.value || state.project || "";
@@ -1152,6 +1177,17 @@ itemForm.addEventListener("submit", async e => {
     dirty = false; itemDlg.close(); toast((editing ? `Saved #${saved.id}` : `Created #${saved.id}`) + nextNote(saved)); await loadProjects(); render();
   } catch (err) { toast(err.message); }
 });
+$("#saveTplBtn").onclick = async () => {
+  const name = itemForm.title.value.trim(); if (!name) return itemForm.title.focus();
+  const body = { name };
+  TPL_KEYS.forEach(k => { const v = String(itemForm[k].value ?? "").trim(); body[k] = v || (k === "description" || k === "estimate_hours" ? null : undefined); });
+  try {
+    const exists = state.templates?.some(x => x.name.toLowerCase() === name.toLowerCase());
+    if (exists && !(await ask(`Replace the ${name} template?`, "A template with this name exists. Its title, checklist, kind, priority, assignee and estimate are replaced with this item's.", { ok: "Replace" }))) return;
+    const x = await api("/api/templates", { method: "POST", body });
+    await loadTemplates(); toast(`Saved the ${x.name} template`);
+  } catch (err) { toast(err.message); }
+};
 $("#deleteItem").onclick = async () => {
   if (!editing || !(await ask(`Delete #${editing.id}?`, `"${editing.title}" and its link to notes will be removed. This can't be undone.`, { ok: "Delete", danger: true }))) return;
   await api(`/api/items/${editing.id}`, { method: "DELETE" }); dirty = false; itemDlg.close(); toast("Deleted"); render();
@@ -1281,10 +1317,12 @@ async function ckRender() {
     } catch { found = []; }
     if (seq !== ckSeq) return; // a newer keystroke is already rendering
   }
+  const tpls = (state.templates || []).filter(x => !q || fuzzy(q, x.name) || fuzzy(q, "template " + x.name));
   const quick = q.length >= 3 && !idm ? parseQuick(q) : null;
   const qProj = quick && (quick.fields.project || projectFilter.value || state.projects[0]?.slug);
   ckItems = [
     ...strong.slice(0, q ? 6 : 30).map(c => ({ sec: "Commands", ...c, sub: c.s ? esc(c.s) : "" })),
+    ...tpls.slice(0, q ? 4 : 8).map(x => ({ sec: "Templates", k: "plus", t: `New ${x.name}`, sub: `${esc(x.kind)}${tplSteps(x.description) ? ` · ${tplSteps(x.description)} steps` : ""}${x.assignee === "me" ? " · for you" : ""}`, run: () => useTemplate(x) })),
     ...found.slice(0, 8).map(it => ({ sec: "Items", k: "item", t: `#${it.id} ${it.title}`, sub: `${pchip(it.project)}${statusChip(it.status)}${holdTag(it)}${repeatTag(it)}${depTag(it)}`, run: () => openItem(it.id) })),
     ...(quick && quick.title ? [{ sec: "Create", k: "plus", t: `New item: ${quick.title}`, kbd: "Shift ↵",
         sub: pchip(qProj) + quick.chips.map(c => `<span class="tag">${esc(c)}</span>`).join(""), run: () => quickCreate(quick, qProj) }] : []),
@@ -1598,6 +1636,12 @@ $("#view").addEventListener("click", async e => {
     catch (err) { toast(err.message); }
     return render();
   }
+  const tu = t.closest("[data-tpl-use]"); if (tu) return useTemplate(state.templates.find(x => x.id === +tu.dataset.tplUse));
+  const td = t.closest("[data-tpl-del]"); if (td) {
+    if (!(await ask(`Delete the ${td.dataset.name} template?`, "Items already made from it stay as they are.", { ok: "Delete", danger: true }))) return;
+    try { await api(`/api/templates/${td.dataset.tplDel}`, { method: "DELETE" }); toast("Template deleted"); } catch (err) { toast(err.message); }
+    return render();
+  }
   if (t.closest("[data-clear-focus]")) {
     if (!(await ask("Clear focus history?", "Deletes every logged focus session. Items, notes and their actual hours are not touched.", { ok: "Clear", danger: true }))) return;
     await api("/api/focus", { method: "DELETE" }); Object.keys(focusLog).forEach(k => delete focusLog[k]); toast("Focus history cleared"); return render();
@@ -1708,6 +1752,15 @@ $("#view").addEventListener("input", e => {
   }, 250);
 });
 $("#view").addEventListener("submit", async e => {
+  if (e.target.id === "tplForm") {
+    e.preventDefault(); const f = e.target;
+    const steps = f.steps.value.split("\n").map(s => s.trim().replace(/^[-*+]\s+(\[[ xX]\]\s+)?/, "")).filter(Boolean);
+    try {
+      const x = await api("/api/templates", { method: "POST", body: { name: f.name.value, kind: f.kind.value, description: steps.map(s => `- [ ] ${s}`).join("\n") || null } });
+      toast(`Saved the ${x.name} template`); render();
+    } catch (err) { toast(err.message); }
+    return;
+  }
   if (e.target.id !== "noteForm") return;
   e.preventDefault(); const f = e.target;
   if (!f.body.value.trim()) return f.body.focus();
@@ -1736,6 +1789,6 @@ setInterval(() => {
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => look.theme === "auto" && state.view === "settings" && render());
   state.meta = await api("/api/meta");
   await loadFocus();
-  await loadProjects();
+  await Promise.all([loadProjects(), loadTemplates()]);
   render();
 })();

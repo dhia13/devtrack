@@ -132,3 +132,23 @@ def test_blocked_by_field_round_trips(server, page):
     page.locator("#itemDlg[open]").wait_for()
     assert page.input_value("#itemForm [name=blocked_by]") == f"#{first['id']}"
     assert page.errors == []
+
+
+def test_template_from_the_command_bar(server, page):
+    page.keyboard.press("Control+K")
+    page.fill("#ckq", "store sub")
+    page.locator(".ck-sec", has_text="Templates").wait_for()
+    page.keyboard.press("Enter")
+    page.locator("#itemDlg[open]").wait_for()
+    assert page.input_value("#itemForm [name=title]") == "Submit to the store"
+    assert page.is_checked("#itemForm [name=assignee][value=me]")
+    assert "Upload the build" in page.input_value("#itemForm [name=description]")
+    page.click("#itemDlg [data-close]")
+    page.click('#nav button[data-view="settings"]')
+    page.fill("#tplForm [name=name]", "Hotfix")
+    page.fill("#tplForm [name=steps]", "Reproduce\n- [ ] Fix")
+    page.click("#tplForm button[type=submit]")
+    page.locator("#sect-templates .bk", has_text="Hotfix").wait_for()
+    hotfix = next(t for t in _api(server, "/api/templates") if t["name"] == "Hotfix")
+    assert hotfix["description"] == "- [ ] Reproduce\n- [ ] Fix"
+    assert page.errors == []

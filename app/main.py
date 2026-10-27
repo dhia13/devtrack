@@ -207,6 +207,32 @@ def redate(item_id: int, day: str | None = None, start: str = "09:00", end: str 
     return s.redate_plan(item_id, day, start, end, remote)
 
 
+# ---- templates
+
+@app.get("/api/templates")
+def templates():
+    return s.list_templates()
+
+
+@app.post("/api/templates")
+def save_template(body: dict = Body(...)):
+    return s.save_template(body.pop("name", ""), **body)
+
+
+@app.delete("/api/templates/{ref}")
+def remove_template(ref: str):
+    s.delete_template(ref)
+    return {"ok": True}
+
+
+@app.post("/api/templates/{ref}/use")
+def use_template(ref: str, body: dict = Body(...)):
+    project, title = body.pop("project", None), body.pop("title", None)
+    if not project:
+        raise s.Invalid("project is required")
+    return s.create_from_template(ref, project, title, **body)
+
+
 # ---- notes, planning
 
 @app.get("/api/notes")
