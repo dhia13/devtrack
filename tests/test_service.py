@@ -134,3 +134,22 @@ def test_focus_log_and_time_report():
         s.log_focus(0)
     assert s.import_focus({"2026-01-05": 40, "2026-01-06": 0}) == {"imported_days": 1}
     assert s.clear_focus()["deleted"] == 3
+
+
+def test_list_order_and_limit_done_in_sql():
+    import random
+
+    rnd = random.Random(7)
+    for n in range(60):
+        dates = {f: iso(rnd.randint(-5, 20)) for f in ("submit_on", "merge_on", "deploy_on", "due_on") if rnd.random() < 0.4}
+        s.create_item("demo", f"i{n}", status=rnd.choice(s.STATUSES), priority=rnd.choice(s.PRIORITIES), **dates)
+
+    def expected(it):  # the order the dashboard relies on, spelled out in Python
+        nxt = it["next_milestone"]["date"] if it["next_milestone"] else "9999-12-31"
+        return (it["status"] in s.CLOSED, nxt, s.PRIORITIES.index(it["priority"]), -it["id"])
+
+    everything = s.list_items(include_closed=True, limit=1000)
+    assert len(everything) == 60
+    assert everything == sorted(everything, key=expected)
+    assert s.list_items(include_closed=True, limit=5) == everything[:5]
+    assert all(i["status"] not in s.CLOSED for i in s.list_items(limit=1000))

@@ -179,10 +179,19 @@ LEFT JOIN git_status g ON g.item_id = i.id
 HOLD_SQL = "(COALESCE(i.snoozed_until > date('now','localtime'), 0) OR (i.waiting_for IS NOT NULL AND i.snoozed_until IS NULL))"
 
 
-def _sort_key(it: dict):
-    closed = it["status"] in CLOSED
-    nxt = it["next_milestone"]["date"] if it["next_milestone"] else "9999-12-31"
-    return (closed, nxt, PRIORITIES.index(it["priority"]), -it["id"])
+def _case(column: str, order: dict) -> str:
+    return f"CASE {column} " + " ".join(f"WHEN '{k}' THEN {v}" for k, v in order.items()) + " END"
+
+
+# The same order _item_dict's next_milestone gives, done in SQL so LIMIT applies before rows are
+# shaped: open items first, then soonest pending milestone, priority, newest.
+_RANK_SQL = _case("i.status", RANK)
+_NEXT_SQL = "MIN(" + ", ".join(
+    f"CASE WHEN {_RANK_SQL} < {reached} AND i.{field} IS NOT NULL THEN i.{field} ELSE '9999-12-31' END"
+    for _kind, field, reached in MILESTONES) + ")"
+ITEM_ORDER = (f" ORDER BY i.status IN ({', '.join(repr(c) for c in CLOSED)}),"
+              f" CASE WHEN i.status = 'cancelled' THEN '9999-12-31' ELSE {_NEXT_SQL} END,"
+              f" {_case('i.priority', {p: n for n, p in enumerate(PRIORITIES)})}, i.id DESC")
 
 
 # ---------------------------------------------------------------- projects
@@ -287,10 +296,6 @@ def _insert_item(conn, project_id: int, fields: dict) -> int:
 def list_items(project=None, status=None, assignee=None, kind=None,
                include_closed: bool = False, search=None, limit: int = 200) -> list[dict]:
     where, args = [], []
-    if project:
-        with tx() as conn:
-            where.append("i.project_id = ?")
-            args.append(_get_project(conn, project)["id"])
     if status:
         statuses = [s.strip() for s in str(status).split(",") if s.strip()]
         where.append(f"i.status IN ({', '.join('?' * len(statuses))})")
@@ -306,11 +311,12 @@ def list_items(project=None, status=None, assignee=None, kind=None,
     if search:
         where.append("(i.title LIKE ? OR i.description LIKE ? OR i.branch LIKE ? OR i.ticket_ref LIKE ?)")
         args += [f"%{search}%"] * 4
-    sql = ITEM_SELECT + (" WHERE " + " AND ".join(where) if where else "")
     with tx() as conn:
-        items = [_item_dict(r) for r in conn.execute(sql, args)]
-    items.sort(key=_sort_key)
-    return items[: max(1, int(limit))]
+        if project:
+            where.append("i.project_id = ?")
+            args.append(_get_project(conn, project)["id"])
+        sql = ITEM_SELECT + (" WHERE " + " AND ".join(where) if where else "") + ITEM_ORDER + " LIMIT ?"
+        return [_item_dict(r) for r in conn.execute(sql, (*args, max(1, int(limit))))]
 
 
 def get_item(item_id: int, with_notes: bool = True) -> dict:
