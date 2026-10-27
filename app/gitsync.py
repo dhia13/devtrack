@@ -18,15 +18,15 @@ import urllib.request
 from datetime import date, datetime
 from pathlib import Path
 
-from . import config, service as s
+from . import config as cfg, service as s  # cfg: config() below is the Settings endpoint
 from .db import now, tx
 
-REPOS_ROOT = config.REPOS_ROOT
-REPOS_HOST = config.REPOS_HOST
-GITHUB_TOKEN = config.GITHUB_TOKEN
-GITLAB_TOKEN = config.GITLAB_TOKEN
-GITLAB_URL = config.GITLAB_URL
-AUTO_STATUS = config.GIT_AUTO_STATUS
+REPOS_ROOT = cfg.REPOS_ROOT
+REPOS_HOST = cfg.REPOS_HOST
+GITHUB_TOKEN = cfg.GITHUB_TOKEN
+GITLAB_TOKEN = cfg.GITLAB_TOKEN
+GITLAB_URL = cfg.GITLAB_URL
+AUTO_STATUS = cfg.GIT_AUTO_STATUS
 
 GH_PR = re.compile(r"https?://github\.com/([^/]+/[^/]+)/pull/(\d+)")
 GL_MR = re.compile(r"https?://[^/]+/(.+?)/-/merge_requests/(\d+)")
@@ -312,7 +312,7 @@ def config() -> dict:
         "mounted": REPOS_ROOT.is_dir() and any(REPOS_ROOT.iterdir()),
         "github_token": bool(GITHUB_TOKEN), "gitlab_token": bool(GITLAB_TOKEN), "gitlab_url": GITLAB_URL,
         "auto_status": AUTO_STATUS,
-        "every_minutes": config.GIT_SYNC_MINUTES,
+        "every_minutes": cfg.GIT_SYNC_MINUTES,
         "last_run": last_run or None,
         "today": date.today().isoformat(),
     }

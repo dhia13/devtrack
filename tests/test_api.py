@@ -3,6 +3,16 @@ def test_health_and_meta(client):
     assert "parked" in client.get("/api/meta").json()["statuses"]
 
 
+def test_dashboard_and_assets_served(client):
+    page = client.get("/")
+    assert page.status_code == 200 and page.headers["cache-control"] == "no-cache"
+    for asset in ("/static/app.js", "/static/app.css"):
+        assert asset in page.text
+        r = client.get(asset)
+        assert r.status_code == 200 and r.headers["cache-control"] == "no-cache" and r.headers.get("etag")
+    assert client.get("/static/../main.py").status_code == 404
+
+
 def test_foreign_host_rejected(client):
     assert client.get("/api/health", headers={"Host": "evil.example"}).status_code == 400
 
@@ -52,6 +62,11 @@ def test_calendar_and_export(client):
     assert client.get("/api/calendar.ics").text.startswith("BEGIN:VCALENDAR")
     data = client.get("/api/export").json()
     assert {"projects", "items", "notes", "focus_sessions"} <= set(data)
+
+
+def test_git_settings(client):
+    r = client.get("/api/git")
+    assert r.status_code == 200 and r.json()["every_minutes"] == 0
 
 
 def test_mcp_endpoint_mounted(client):
