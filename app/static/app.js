@@ -1890,6 +1890,15 @@ setInterval(() => {
   state.meta = await api("/api/meta");
   await loadFocus();
   await Promise.all([loadProjects(), loadTemplates()]);
+  // a home-screen shortcut or a notification can open a view: /?view=agenda
+  const qv = new URLSearchParams(location.search).get("view");
+  if (VIEWS.includes(qv)) { state.view = qv; history.replaceState(null, "", "/"); }
   render();
   checkReminders();
 })();
+if ("serviceWorker" in navigator && isSecureContext) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+  navigator.serviceWorker.addEventListener("message", e => { if (VIEWS.includes(e.data?.view)) { state.view = e.data.view; render(); } });
+}
+addEventListener("offline", () => toast("You're offline. Changes won't save until you're back."));
+addEventListener("online", () => { toast("Back online"); render(); });

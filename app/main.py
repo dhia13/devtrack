@@ -91,6 +91,12 @@ def index():
     return FileResponse(STATIC / "index.html", headers=NO_CACHE)
 
 
+@app.get("/sw.js", include_in_schema=False)
+def service_worker():
+    # Served from the root so it can control the whole app.
+    return FileResponse(STATIC / "sw.js", media_type="text/javascript", headers=NO_CACHE)
+
+
 app.mount("/static", _Static(directory=STATIC), name="static")
 
 

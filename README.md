@@ -104,6 +104,22 @@ when you start it from one. Ending a block also offers to add its minutes to the
 hours. **Insights → Time by project** shows focus hours per project for the chosen range, and, for
 items finished in it, estimate vs actual hours and cost, with a CSV download (`/api/time.csv`).
 
+## On your phone
+
+The dashboard fits a phone: the views sit in a bar along the bottom, tiles go two a row, the task
+board shows one lane at a time (swipe for the next), and the item editor fills the screen. It is
+also an installable app: in Chrome or Edge use **Install app** (on Android, **Add to home screen**),
+and in Safari on iOS **Share → Add to Home Screen**. The installed app opens without browser bars,
+starts from the last copy when you're offline (changes need the connection), and has Agenda and
+Tasks shortcuts on its icon.
+
+Installing needs HTTPS, or `localhost` on the PC itself. To reach DevTrack from your phone, first
+set it up as in [Reaching it from another machine](#reaching-it-from-another-machine), then put
+HTTPS in front, for example with Tailscale: `tailscale serve --bg 8787` gives you
+`https://my-pc.tailnet.ts.net`, and that host name goes in `DEVTRACK_ALLOWED_HOSTS`. Over plain
+HTTP the page still works in the phone's browser, but it can't be installed and doesn't send
+notifications.
+
 ## Reminders
 
 Turn on **Settings → Reminders → Notifications** and DevTrack sends a morning summary (from the
@@ -245,7 +261,7 @@ DEVTRACK_BIND=0.0.0.0                    # or your Tailscale IP
 DEVTRACK_ALLOWED_HOSTS=localhost,127.0.0.1,devtrack.localhost,my-pc.tailnet.ts.net
 ```
 
-With a token, every request except `/api/health` needs it:
+With a token, every request except `/api/health` (and the app manifest and its icons) needs it:
 
 - **Dashboard:** sign in once at `/login`; it keeps an HttpOnly cookie for 90 days. `/logout` signs out.
 - **Agents and scripts:** `Authorization: Bearer <token>` (see [Connect an agent](#connect-an-agent)).

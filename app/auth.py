@@ -17,7 +17,9 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from . import config
 
 COOKIE = "devtrack_session"
-OPEN_PATHS = {"/api/health", "/login", "/logout"}
+# The app manifest and its icons are fetched without cookies, so they stay public (they hold nothing).
+OPEN_PATHS = {"/api/health", "/login", "/logout", "/static/manifest.webmanifest", "/static/icon.svg",
+              "/static/icon-192.png", "/static/icon-512.png", "/static/icon-maskable.png", "/static/apple-touch-icon.png"}
 QUERY_TOKEN_PATHS = {"/api/calendar.ics"}
 
 

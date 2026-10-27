@@ -188,6 +188,8 @@ def test_morning_summary_notifies(server, page):
     page.add_init_script("""
         window.shown = [];
         window.Notification = class { static permission = "granted"; constructor(t, o) { shown.push([t, o.body]); } close() {} };
+        if (window.ServiceWorkerRegistration)
+            ServiceWorkerRegistration.prototype.showNotification = async (t, o) => { shown.push([t, o.body]); };
         if (!sessionStorage.getItem("seeded")) {
             sessionStorage.setItem("seeded", "1");
             localStorage.setItem("devtrack-look", JSON.stringify({ remind: true, remindHour: 0 }));
@@ -204,4 +206,17 @@ def test_morning_summary_notifies(server, page):
     page.click('#nav button[data-view="settings"]')
     page.click("[data-remind-test]")
     page.wait_for_function("window.shown.length > 0")
+    assert page.errors == []
+
+
+def test_installable_and_opens_a_view_from_the_url(server, page):
+    page.goto(server + "/?view=agenda")
+    page.locator("h1", has_text="Agenda").wait_for()
+    assert page.evaluate("location.search") == ""
+    assert page.evaluate("navigator.serviceWorker.ready.then(r => r.active.scriptURL)").endswith("/sw.js")
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.click('#nav button[data-view="settings"]')
+    page.locator("#sect-reminders").wait_for()
+    assert page.evaluate("document.documentElement.scrollWidth") <= 390
+    assert page.locator('#nav button[data-view="settings"]').is_visible()
     assert page.errors == []

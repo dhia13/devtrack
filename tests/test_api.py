@@ -75,3 +75,13 @@ def test_mcp_endpoint_mounted(client):
     assert r.status_code == 200
     names = {t["name"] for t in r.json()["result"]["tools"]}
     assert {"agenda", "handoff", "git_sync", "time_report"} <= names
+
+
+def test_installable_app_files(client):
+    m = client.get("/static/manifest.webmanifest").json()
+    assert m["start_url"] == "/" and m["display"] == "standalone"
+    for icon in m["icons"]:
+        assert client.get(icon["src"]).status_code == 200, icon["src"]
+    sw = client.get("/sw.js")
+    assert sw.headers["content-type"].startswith("text/javascript") and "no-cache" in sw.headers["cache-control"]
+    assert 'rel="manifest"' in client.get("/").text
