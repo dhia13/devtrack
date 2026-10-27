@@ -1,5 +1,6 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not e2e'"  # run the browser tests with: python -m pytest -m e2e
 markers = ["e2e: drives the dashboard in a real browser (needs the playwright package)"]
 
 [tool.coverage.run]

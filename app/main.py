@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Body, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import backup, config, db, gitsync, service as s
@@ -74,9 +75,23 @@ async def _invalid(_req: Request, exc: s.Invalid):
     return JSONResponse({"error": str(exc)}, status_code=400)
 
 
+# no-cache = revalidate with the ETag on each load, so a rebuilt image's UI shows up at once.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class _Static(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers.update(NO_CACHE)
+        return response
+
+
 @app.get("/", include_in_schema=False)
 def index():
-    return FileResponse(STATIC / "index.html")
+    return FileResponse(STATIC / "index.html", headers=NO_CACHE)
+
+
+app.mount("/static", _Static(directory=STATIC), name="static")
 
 
 @app.get("/api/health")
