@@ -1496,7 +1496,53 @@ projectFilter.onchange = () => { state.selected.clear(); render(); };
 $("#newItem").onclick = () => openItem(null);
 $("#tSearch").onclick = () => openCmdk();
 $("#tTheme").onclick = () => { look.theme = isDark() ? "light" : "dark"; applyLook(); if (state.view === "settings") render(); };
-$("#tBell").onclick = () => { state.view = "home"; render(); };
+// ---------- bell: what's waiting on you, in a menu under the button
+const bell = $("#tBell"), bellMenu = document.createElement("div");
+bellMenu.className = "dd-menu bell-menu"; bellMenu.id = "bellMenu"; bellMenu.setAttribute("role", "menu"); bellMenu.setAttribute("aria-label", "Waiting on you");
+if ("popover" in HTMLElement.prototype) bellMenu.popover = "manual";
+document.body.appendChild(bellMenu);
+bell.setAttribute("aria-haspopup", "menu"); bell.setAttribute("aria-expanded", "false"); bell.setAttribute("aria-controls", "bellMenu");
+const bellOpen = () => bell.getAttribute("aria-expanded") === "true";
+function bellRow(it) {
+  const when = it.due_on ? `<span class="${it.due_on < todayISO() ? "late" : ""}">${it.due_on === todayISO() ? "today" : rel(it.due_on)}</span>` : "";
+  return `<button type="button" class="dd-opt bell-row" role="menuitem" data-open="${it.id}">
+    <span class="tx"><b>${esc(it.title)}</b><span class="sub">${pchip(it.project)}${when}${holdTag(it)}</span></span></button>`;
+}
+async function showBell() {
+  bellMenu.innerHTML = `<div class="bell-h">Waiting on you</div><div class="empty">Loading…</div>`;
+  bellMenu.popover ? bellMenu.showPopover() : bellMenu.classList.add("show");
+  bell.setAttribute("aria-expanded", "true"); placeBell();
+  try {
+    const a = await api("/api/agenda?days=7" + (projectFilter.value ? "&project=" + encodeURIComponent(projectFilter.value) : ""));
+    const mine = [...a.waiting_on_me].sort((x, y) => (x.due_on || "9999").localeCompare(y.due_on || "9999") || PRIO(x) - PRIO(y));
+    bellMenu.innerHTML = `<div class="bell-h">Waiting on you <b>${mine.length}</b></div>`
+      + (mine.slice(0, 12).map(bellRow).join("") || `<div class="empty">Nothing waiting on you.</div>`)
+      + `<button type="button" class="dd-opt bell-all" role="menuitem" data-home>${mine.length > 12 ? `See all ${mine.length} on Home` : "Open Home"}</button>`;
+  } catch (err) { bellMenu.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+  if (bellOpen()) placeBell();
+}
+function placeBell() {
+  const r = bell.getBoundingClientRect(), w = Math.min(380, innerWidth - 16);
+  bellMenu.style.width = w + "px";
+  bellMenu.style.maxHeight = Math.max(200, innerHeight - r.bottom - 16) + "px";
+  bellMenu.style.top = r.bottom + 6 + "px";
+  bellMenu.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + "px";
+}
+function hideBell(focus = false) {
+  if (!bellOpen()) return;
+  bellMenu.popover ? (() => { try { bellMenu.hidePopover(); } catch {} })() : bellMenu.classList.remove("show");
+  bell.setAttribute("aria-expanded", "false");
+  if (focus) bell.focus();
+}
+bell.onclick = () => bellOpen() ? hideBell() : showBell();
+bellMenu.addEventListener("click", e => {
+  const row = e.target.closest("[data-open]");
+  if (row) { hideBell(); return openItem(+row.dataset.open); }
+  if (e.target.closest("[data-home]")) { hideBell(); state.view = "home"; render(); }
+});
+document.addEventListener("pointerdown", e => { if (bellOpen() && !e.target.closest?.("#bellMenu, #tBell")) hideBell(); }, true);
+document.addEventListener("keydown", e => { if (e.key === "Escape" && bellOpen()) { e.preventDefault(); hideBell(true); } }, true);
+addEventListener("resize", () => hideBell());
 island.addEventListener("click", e => {
   const b = e.target.closest("[data-focus]"); if (b) { e.stopPropagation(); return focusAction(b.dataset.focus); }
   if (focusS && !island.classList.contains("toasting")) island.classList.toggle("open");

@@ -664,6 +664,17 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line-st
 .dd-opt.act { background: var(--hover); }
 .dd-opt[aria-selected="true"] { font-weight: 650; }
 .dd-opt[aria-disabled="true"] { opacity: .45; cursor: default; }
+.bell-menu { padding: 6px; }
+.bell-h { padding: 6px 10px 8px; font-size: 13px; font-weight: 650; color: var(--muted); }
+.bell-h b { color: var(--text); margin-left: 4px; }
+.bell-row, .bell-all { width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; white-space: normal; }
+.bell-row:hover, .bell-all:hover, .bell-row:focus-visible, .bell-all:focus-visible { background: var(--hover); outline: none; }
+.bell-row .tx { display: grid; gap: 3px; min-width: 0; }
+.bell-row b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bell-row .sub { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+.bell-row .late { color: var(--danger); }
+.bell-all { justify-content: center; color: var(--accent); font-size: 13px; margin-top: 2px; border-top: 1px solid var(--line); border-radius: 0 0 9px 9px; }
+.bell-menu .empty { padding: 10px; font-size: 13px; color: var(--muted); }
 /* ================= hold, git, backups */
 .hold-quick { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 8px; }
 .hold-quick .chip { font-size: 12.5px; padding: 2px 10px; }
