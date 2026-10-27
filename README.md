@@ -30,6 +30,13 @@ Register the server once, at user level, so every repo can use it:
 { "mcpServers": { "devtrack": { "type": "http", "url": "http://localhost:8787/mcp" } } }
 ```
 
+With a login token set (see [Security](#security)), add it as a header:
+
+```json
+{ "mcpServers": { "devtrack": { "type": "http", "url": "http://localhost:8787/mcp",
+  "headers": { "Authorization": "Bearer <DEVTRACK_TOKEN>" } } } }
+```
+
 Then paste [docs/agent-instructions.md](docs/agent-instructions.md) into each repo's agent
 instructions file, with `<slug>` set to that project's slug.
 
@@ -45,6 +52,7 @@ instructions file, with `<slug>` set to that project's slug.
 | `merge_on`, `deploy_on`, `due_on` | planned milestones; they show on the agenda until reached |
 | `estimate_hours`, `actual_hours`, `cost`, `currency` | effort and cost, summed per project |
 | `waiting_for`, `snoozed_until` | on hold: who it waits on, and when to check back (see below) |
+| `repeat_every` | `daily`, `weekly`, `monthly`, `yearly`, or `90d`, `2w`, `3m`: see [Recurring items](#recurring-items) |
 
 Dates accept `YYYY-MM-DD`, `today`, `tomorrow`, `+3d`, `friday`, `next friday`.
 
@@ -91,6 +99,17 @@ The focus timer (the island at the top) saves every finished block to DevTrack, 
 when you start it from one. Ending a block also offers to add its minutes to the item's actual
 hours. **Insights → Time by project** shows focus hours per project for the chosen range, and, for
 items finished in it, estimate vs actual hours and cost, with a CSV download (`/api/time.csv`).
+
+## Recurring items
+
+Give an item `repeat_every` (the **Repeat** field in the item dialog) and marking it done schedules
+the next one: same title, description, kind, assignee, priority, estimate and cost, status `todo`,
+with checklist boxes unticked. Its dates move on by whole periods until the earliest is in the
+future, so a weekly release finished late still lands on the next week, and the gaps between
+submit, deploy and due stay the same. An item with no dates comes back due one period from today.
+Branch, PR and actual hours are not copied. Each copy links back with `repeat_of`, a note on the
+finished item names the new one, and reopening and finishing it again doesn't make a second copy.
+Clear the field to stop repeating.
 
 ## On hold
 
@@ -155,8 +174,27 @@ on every push.
 
 ## Security
 
-There is no login. The port is bound to `127.0.0.1` only, and requests with a `Host` other than
-`localhost` or `127.0.0.1` are rejected (`DEVTRACK_ALLOWED_HOSTS`), which blocks DNS rebinding from
-web pages. Writes (POST, PATCH, DELETE) sent by another site's page are refused too, using the
-browser's `Origin` and `Sec-Fetch-Site` headers; agents and `curl` don't send them and are unaffected.
-Don't publish the port on a network interface without adding authentication.
+By default there is no login: the port is bound to `127.0.0.1` only, and requests with a `Host`
+other than `localhost` or `127.0.0.1` are rejected (`DEVTRACK_ALLOWED_HOSTS`), which blocks DNS
+rebinding from web pages. Writes (POST, PATCH, DELETE) sent by another site's page are refused too,
+using the browser's `Origin` and `Sec-Fetch-Site` headers; agents and `curl` don't send them and are
+unaffected.
+
+### Reaching it from another machine
+
+Set a token, then open the port and allow the host name you'll use, in `.env`:
+
+```bash
+DEVTRACK_TOKEN=$(openssl rand -hex 24)   # at least 16 characters
+DEVTRACK_BIND=0.0.0.0                    # or your Tailscale IP
+DEVTRACK_ALLOWED_HOSTS=localhost,127.0.0.1,devtrack.localhost,my-pc.tailnet.ts.net
+```
+
+With a token, every request except `/api/health` needs it:
+
+- **Dashboard:** sign in once at `/login`; it keeps an HttpOnly cookie for 90 days. `/logout` signs out.
+- **Agents and scripts:** `Authorization: Bearer <token>` (see [Connect an agent](#connect-an-agent)).
+- **Calendar apps:** they can't send headers, so subscribe to `/api/calendar.ics?token=<token>`.
+
+The connection is plain HTTP, so only open it on a network you trust, such as Tailscale or WireGuard,
+or put an HTTPS reverse proxy in front.

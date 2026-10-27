@@ -11,8 +11,10 @@ def _legacy_db():
     for suffix in ("", "-wal", "-shm"):
         Path(db.DB_PATH + suffix).unlink(missing_ok=True)
     conn = sqlite3.connect(db.DB_PATH)
-    schema = db.SCHEMA.replace(",\n    waiting_for    TEXT,\n    snoozed_until  TEXT", "")
-    assert "waiting_for" not in schema.split("CREATE TABLE IF NOT EXISTS notes")[0]
+    later = ",\n    waiting_for    TEXT,\n    snoozed_until  TEXT,\n    repeat_every   TEXT,\n" \
+            "    repeat_of      INTEGER REFERENCES items(id) ON DELETE SET NULL"
+    assert later in db.SCHEMA
+    schema = db.SCHEMA.replace(later, "")
     conn.executescript(schema)
     conn.execute("INSERT INTO projects (slug, name, created_at, updated_at) VALUES ('old', 'old', 'x', 'x')")
     conn.commit()
@@ -32,7 +34,7 @@ def test_new_database_is_at_latest_version():
 def test_legacy_database_is_migrated_and_init_is_idempotent():
     _legacy_db()
     db.init()
-    assert {"waiting_for", "snoozed_until"} <= _columns("items")
+    assert {"waiting_for", "snoozed_until", "repeat_every", "repeat_of"} <= _columns("items")
     db.init()  # running again changes nothing
     with db.tx() as conn:
         assert db.schema_version(conn) == db.SCHEMA_VERSION

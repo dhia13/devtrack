@@ -96,3 +96,11 @@ def test_command_bar_creates_an_item(server, page):
         time.sleep(0.1)
     assert titles["Smoke test from the command bar"]["priority"] == "high"
     assert page.errors == []
+
+
+def test_repeating_item_shows_its_period(server, page):
+    _api(server, "/api/items", {"project": "demo", "title": "Weekly invoice run", "repeat_every": "weekly"})
+    page.reload()
+    page.click('#nav button[data-view="tasks"]')
+    page.get_by_text("↻ 1w").first.wait_for()
+    assert page.errors == []

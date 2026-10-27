@@ -39,7 +39,7 @@ DATE_FIELDS = ("built_on", "submit_on", "merge_on", "deploy_on", "due_on", "snoo
 DATETIME_FIELDS = ("commit_date",)
 NUM_FIELDS = ("estimate_hours", "actual_hours", "cost")
 ENUM_FIELDS = {"kind": KINDS, "status": STATUSES, "assignee": ASSIGNEES, "priority": PRIORITIES}
-ITEM_FIELDS = TEXT_FIELDS + DATE_FIELDS + DATETIME_FIELDS + NUM_FIELDS + tuple(ENUM_FIELDS)
+ITEM_FIELDS = TEXT_FIELDS + DATE_FIELDS + DATETIME_FIELDS + NUM_FIELDS + tuple(ENUM_FIELDS) + ("repeat_every",)
 PROJECT_FIELDS = ("name", "repo_path", "repo_url", "description", "status")
 
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -95,6 +95,32 @@ def parse_date(value) -> date:
         raise Invalid(f"bad date {value!r}: use YYYY-MM-DD, today, tomorrow, +Nd or a weekday") from None
 
 
+REPEAT_UNITS = {"d": "day", "w": "week", "m": "month", "y": "year"}
+REPEAT_WORDS = {"daily": "1d", "weekly": "1w", "fortnightly": "2w", "biweekly": "2w", "monthly": "1m",
+                "quarterly": "3m", "yearly": "1y", "annually": "1y"}
+
+
+def parse_repeat(value) -> str:
+    """'weekly', '90d', '2w', 'every 3 months', ... -> canonical '<n><d|w|m|y>'."""
+    s = re.sub(r"^every\s+", "", str(value).strip().lower())
+    if s in REPEAT_WORDS:
+        return REPEAT_WORDS[s]
+    m = re.fullmatch(r"(\d*)\s*(d|days?|w|weeks?|m|months?|y|years?)", s)
+    if not m or (m.group(1) and int(m.group(1)) == 0) or int(m.group(1) or 1) > 1000:
+        raise Invalid(f"bad repeat {value!r}: use daily, weekly, monthly, yearly, or e.g. 90d, 2w, 3m")
+    return f"{int(m.group(1) or 1)}{m.group(2)[0]}"
+
+
+def shift_date(d: date, every: str, times: int = 1) -> date:
+    n, unit = int(every[:-1]) * times, every[-1]
+    if unit in "dw":
+        return d + timedelta(days=n * (7 if unit == "w" else 1))
+    months = d.month - 1 + n * (12 if unit == "y" else 1)
+    year, month = d.year + months // 12, months % 12 + 1
+    last = (date(year + month // 12, month % 12 + 1, 1) - timedelta(days=1)).day
+    return date(year, month, min(d.day, last))  # Jan 31 + 1m = Feb 28
+
+
 def parse_datetime(value) -> str:
     s = str(value).strip().replace(" ", "T")
     if "T" not in s:
@@ -120,7 +146,9 @@ def _clean_item(fields: dict) -> dict:
             continue
         if key in ENUM_FIELDS and value not in ENUM_FIELDS[key]:
             raise Invalid(f"{key} must be one of {', '.join(ENUM_FIELDS[key])}")
-        if key in DATE_FIELDS:
+        if key == "repeat_every":
+            value = parse_repeat(value)
+        elif key in DATE_FIELDS:
             value = parse_date(value).isoformat()
         elif key in DATETIME_FIELDS:
             value = parse_datetime(value)
@@ -336,6 +364,34 @@ def create_item(project, title: str, **fields) -> dict:
         return _fetch_item(conn, item_id)
 
 
+REPEAT_DATES = ("submit_on", "merge_on", "deploy_on", "due_on")
+REPEAT_COPY = ("title", "description", "kind", "assignee", "priority", "ticket_ref", "base_branch",
+               "estimate_hours", "cost", "currency", "repeat_every")
+
+
+def _next_occurrence(conn, it: dict) -> dict:
+    """The item a finished repeating item turns into: same work, dates moved on by whole periods
+    until the earliest is in the future, checklist unticked, branch and actuals cleared."""
+    every, today = it["repeat_every"], date.today()
+    dated = {f: date.fromisoformat(it[f]) for f in REPEAT_DATES if it[f]}
+    fields = {k: it[k] for k in REPEAT_COPY if it[k] is not None}
+    if dated:
+        first, times = min(dated.values()), 1
+        while shift_date(first, every, times) <= today:
+            times += 1
+        fields.update({f: shift_date(d, every, times).isoformat() for f, d in dated.items()})
+    else:
+        fields["due_on"] = shift_date(today, every).isoformat()
+    if fields.get("description"):
+        fields["description"] = re.sub(r"(?m)^(\s*[-*+]\s+)\[[xX]\]", r"\1[ ]", fields["description"])
+    new_id = _insert_item(conn, it["project_id"], {**fields, "status": "todo"})
+    conn.execute("UPDATE items SET repeat_of = ? WHERE id = ?", (it["id"], new_id))
+    nxt = _fetch_item(conn, new_id)
+    when = f", {nxt['next_milestone']['type']} {nxt['next_milestone']['date']}" if nxt["next_milestone"] else ""
+    _insert_note(conn, it["project_id"], f"Repeats every {every}: next is #{new_id}{when}.", "info", it["id"], "devtrack")
+    return nxt
+
+
 def update_item(item_id: int, project=None, note: str | None = None, author: str | None = None, **fields) -> dict:
     with tx() as conn:
         current = _fetch_item(conn, item_id)
@@ -358,7 +414,12 @@ def update_item(item_id: int, project=None, note: str | None = None, author: str
             )
         if note:
             _insert_note(conn, current["project_id"], note, "progress", current["id"], author)
-        return _fetch_item(conn, current["id"])
+        updated = _fetch_item(conn, current["id"])
+        # Reopening and finishing again doesn't make a second copy.
+        if (status == "done" and current["status"] != "done" and updated["repeat_every"]
+                and not conn.execute("SELECT 1 FROM items WHERE repeat_of = ?", (current["id"],)).fetchone()):
+            updated["next_occurrence"] = _compact(_next_occurrence(conn, updated))
+        return updated
 
 
 def delete_item(item_id: int) -> None:
@@ -447,7 +508,7 @@ def handoff(project, summary: str, author=None, done=None, next_steps=None,
 def _compact(it: dict) -> dict:
     keys = ("id", "project", "title", "status", "assignee", "priority", "kind", "branch",
             "submit_on", "merge_on", "deploy_on", "due_on", "needs_redate", "pr_url",
-            "waiting_for", "snoozed_until", "on_hold", "back_today")
+            "waiting_for", "snoozed_until", "on_hold", "back_today", "repeat_every")
     out = {k: it[k] for k in keys}
     g = it.get("git")
     if g:

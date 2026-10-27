@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import backup, config, db, gitsync, service as s
+from . import auth, backup, config, db, gitsync, service as s
 from .mcp_server import mcp
 
 log = logging.getLogger("devtrack")
@@ -135,6 +135,10 @@ class SameOriginWrites:
 
 
 app.add_middleware(SameOriginWrites, allowed_hosts=ALLOWED_HOSTS)
+app.add_middleware(auth.RequireToken)
+app.add_api_route("/login", auth.login_form, methods=["GET"], include_in_schema=False)
+app.add_api_route("/login", auth.login, methods=["POST"], include_in_schema=False)
+app.add_api_route("/logout", auth.logout, methods=["GET", "POST"], include_in_schema=False)
 
 
 # ---- projects
