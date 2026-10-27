@@ -1,16 +1,3 @@
-import pytest
-from fastapi.testclient import TestClient
-
-from app.main import app
-
-
-@pytest.fixture(scope="module")
-def client():
-    # One client for the module: the MCP session manager can only start once per process.
-    with TestClient(app) as c:
-        yield c
-
-
 def test_health_and_meta(client):
     assert client.get("/api/health").json() == {"ok": True}
     assert "parked" in client.get("/api/meta").json()["statuses"]

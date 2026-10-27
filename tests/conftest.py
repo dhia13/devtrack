@@ -30,6 +30,17 @@ def fresh_db():
     yield
 
 
+@pytest.fixture(scope="session")
+def client():
+    # One client per run: the MCP session manager can only start once per process.
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as c:
+        yield c
+
+
 @pytest.fixture
 def tmp_root():
     return _TMP
