@@ -180,3 +180,28 @@ def test_invoice_link_opens_a_printable_page(server, page):
     assert inv.get_by_text("Print or save as PDF").is_visible()
     inv.close()
     assert page.errors == []
+
+
+def test_morning_summary_notifies(server, page):
+    _api(server, "/api/items", {"project": "demo", "title": "Deploy the hotfix", "deploy_on": "today"})
+    # Record notifications instead of showing them, and start with reminders on from midnight.
+    page.add_init_script("""
+        window.shown = [];
+        window.Notification = class { static permission = "granted"; constructor(t, o) { shown.push([t, o.body]); } close() {} };
+        if (!sessionStorage.getItem("seeded")) {
+            sessionStorage.setItem("seeded", "1");
+            localStorage.setItem("devtrack-look", JSON.stringify({ remind: true, remindHour: 0 }));
+            localStorage.removeItem("devtrack-reminded");
+        }
+    """)
+    page.reload()
+    page.wait_for_function("window.shown.length > 0")
+    title, body = page.evaluate("window.shown[0]")
+    assert title == "DevTrack today" and "due today" in body and "deploy · Deploy the hotfix" in body
+    page.reload()  # once a day: the summary isn't repeated
+    page.wait_for_load_state("networkidle")
+    assert page.evaluate("window.shown") == []
+    page.click('#nav button[data-view="settings"]')
+    page.click("[data-remind-test]")
+    page.wait_for_function("window.shown.length > 0")
+    assert page.errors == []

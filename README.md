@@ -104,6 +104,19 @@ when you start it from one. Ending a block also offers to add its minutes to the
 hours. **Insights → Time by project** shows focus hours per project for the chosen range, and, for
 items finished in it, estimate vs actual hours and cost, with a CSV download (`/api/time.csv`).
 
+## Reminders
+
+Turn on **Settings → Reminders → Notifications** and DevTrack sends a morning summary (from the
+hour you pick, or when you first open it after that): how many milestones are due today, overdue
+and back from hold, with the first few titles. During the day it adds a note when something new
+comes due, for example when a snooze ends. They are browser notifications, so they fire while
+DevTrack is open in a tab or installed as an app; when notifications are blocked they show inside
+DevTrack instead. **Test** sends today's summary now.
+
+For reminders with DevTrack closed, subscribe to the calendar feed (Settings → Data): each open
+milestone's event alerts at 09:00 on its day. Change the time with `DEVTRACK_ICS_ALERT`, or set it
+empty for no alerts. `/api/reminders` returns the same summary for scripts.
+
 ## Invoices
 
 Each project row in **Insights → Time by project** with finished items has an **Invoice** link,

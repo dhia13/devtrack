@@ -16,7 +16,7 @@ const store = {
 };
 
 // ---------- appearance (per browser)
-const LOOK_DEFAULT = { theme: "auto", wall: "ash", accent: "blue", glass: "tinted", solid: false, focusMin: 25, breakMin: 5, goalMin: 120, sound: true };
+const LOOK_DEFAULT = { theme: "auto", wall: "ash", accent: "blue", glass: "tinted", solid: false, focusMin: 25, breakMin: 5, goalMin: 120, sound: true, remind: false, remindHour: 9 };
 const look = { ...LOOK_DEFAULT, ...store.get("devtrack-look", {}) };
 const WALLS = ["ash", "sand", "sage", "aurora", "smoke", "tide", "bloom", "ember", "grove", "dusk"];
 const ACCENTS = { blue: "#2f6fde", purple: "#7c5ce0", pink: "#d63f7f", orange: "#d4621f", green: "#1f9254", graphite: "#5d6673" };
@@ -707,7 +707,10 @@ const views = {
     const IC = { look: '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><path d="M12 2a10 10 0 0 0 0 20c1 0 1.6-.8 1.6-1.7 0-.5-.2-.8-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.6 1.7-1.6H16a6 6 0 0 0 6-6c0-4.9-4.5-8.3-10-8.3z"/>',
       focus: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/>', data: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>', keys: '<rect x="2" y="6" width="20" height="13" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 15h10"/>',
       git: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 5-8 3-12 7"/>',
-      tpl: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>' };
+      tpl: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+      bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/>' };
+    const perm = "Notification" in window ? Notification.permission : "unsupported";
+    const hh = h => `${String(h).padStart(2, "0")}:00`;
     await loadTemplates();
     const tpls = state.templates;
     const kb = n => n > 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.round(n / 1e3) + " KB";
@@ -721,6 +724,7 @@ const views = {
         <nav class="panel set-nav" aria-label="Settings sections">
           <button data-sect="appearance">${ico("#a259ff", IC.look)}Appearance</button>
           <button data-sect="focus">${ico("#f08c2e", IC.focus)}Focus</button>
+          <button data-sect="reminders">${ico("#e8a60c", IC.bell)}Reminders</button>
           <button data-sect="backups">${ico("#e5484d", IC.data)}Backups</button>
           <button data-sect="git">${ico("#6b5ae0", IC.git)}Git sync</button>
           <button data-sect="data">${ico("#22b37a", IC.data)}Data</button>
@@ -748,6 +752,14 @@ const views = {
               <input type="checkbox" class="switch" data-look="sound" ${look.sound ? "checked" : ""} aria-label="Chime"></div>
             <div class="set-row"><span class="t"><b>${focusS ? `In focus · ${mmss(focusLeft())} left` : "Start a session now"}</b><small>${focusS ? esc(focusS.title) : `${look.focusMin} minutes, no item`}</small></span>
               ${focusS ? `<button class="btn" data-focus="end">End session</button>` : `<button class="btn primary" data-fstart>Start</button>`}</div>
+          </section>
+          <section class="panel" id="sect-reminders"><div class="panel-h"><div><h3>Reminders</h3><span class="sub">What's due, overdue or back from hold today</span></div></div>
+            <div class="set-row"><span class="t"><b>Notifications</b><small>${perm === "denied" ? `<span class="late">Blocked in this browser's site settings,</span> so reminders show inside DevTrack instead.` : perm === "unsupported" ? "This browser has no notifications, so reminders show inside DevTrack." : "A morning summary, then a note whenever something new comes due. They fire while DevTrack is open in a tab or installed as an app."}</small></span>
+              <input type="checkbox" class="switch" data-look="remind" ${look.remind ? "checked" : ""} aria-label="Notifications"></div>
+            <div class="set-row"><span class="t"><b>Morning summary</b><small>From this hour, or when you first open DevTrack after it</small></span>
+              <span class="stepper"><button type="button" data-step="remindHour" data-d="-1" data-min="0" aria-label="Earlier">−</button><b>${hh(look.remindHour)}</b><button type="button" data-step="remindHour" data-d="1" data-max="23" aria-label="Later">+</button></span></div>
+            <div class="set-row"><span class="t"><b>Send one now</b><small>See today's summary as it will arrive</small></span><button class="btn" data-remind-test>Test</button></div>
+            <div class="set-row"><span class="t"><b>Calendar alerts</b><small>${state.meta.ics_alert ? `Events in the calendar feed alert at ${esc(state.meta.ics_alert)} on the day, even with DevTrack closed. Set DEVTRACK_ICS_ALERT to change the time.` : "Off. Set DEVTRACK_ICS_ALERT=09:00 in .env to make calendar feed events alert on the day."}</small></span></div>
           </section>
           <section class="panel" id="sect-backups"><div class="panel-h"><div><h3>Backups</h3><span class="sub">A snapshot of the whole database every ${bk.every_hours || 24}h, the newest ${bk.keep || 14} kept</span></div><span class="spacer"></span><button class="btn sm primary" data-backup-now ${bk.writable === false ? "disabled" : ""}>Back up now</button></div>
             <div class="set-row"><span class="t"><b>${okLine(last && (Date.now() - new Date(last.taken_at)) < 36 * 36e5, `Last backup ${last ? ago(last.taken_at) : ""}`, last ? `Last backup ${ago(last.taken_at)}` : "No backup yet")}</b>
@@ -1412,6 +1424,46 @@ document.addEventListener("keydown", e => {
 });
 
 
+// ---------- reminders
+// Browser notifications only fire while DevTrack is open (a tab, or the installed app); the
+// calendar feed's alerts cover the rest.
+const canNotify = () => "Notification" in window && Notification.permission === "granted";
+async function notify(title, body, tag) {
+  if (!canNotify()) return toast(`${title}: ${body}`, { label: "Agenda", run: () => { state.view = "agenda"; render(); } });
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) return await reg.showNotification(title, { body, tag, icon: "/static/icon.svg" });
+    const n = new Notification(title, { body, tag, icon: "/static/icon.svg" });
+    n.onclick = () => { window.focus(); state.view = "agenda"; render(); n.close(); };
+  } catch { toast(`${title}: ${body}`); }
+}
+async function checkReminders(force = false) {
+  if (!look.remind && !force) return;
+  const day = todayISO(), seen = store.get("devtrack-reminded", {});
+  if (seen.day !== day) Object.assign(seen, { day, summary: false, keys: [] });
+  if (!force && new Date().getHours() < look.remindHour) return;
+  let r; try { r = await api("/api/reminders"); } catch { return; }
+  const evs = [...r.overdue, ...r.due_today].map(e => ({ key: `${e.item.id}-${e.type}`, text: `${e.type} · ${e.item.title}` }))
+    .concat(r.back_today.map(i => ({ key: `${i.id}-back`, text: `back · ${i.title}` })));
+  if (!seen.summary || force) {
+    seen.summary = true; seen.keys = evs.map(e => e.key);
+    const more = r.waiting_on_me ? ` ${r.waiting_on_me} waiting on you.` : "";
+    if (evs.length || r.waiting_on_me || force) notify("DevTrack today", `${r.summary}${more}${evs.length ? "\n" + evs.slice(0, 4).map(e => e.text).join("\n") : ""}`, "devtrack-summary");
+  } else {
+    const fresh = evs.filter(e => !seen.keys.includes(e.key));
+    seen.keys.push(...fresh.map(e => e.key));
+    if (fresh.length) notify(fresh.length === 1 ? "Now due" : `${fresh.length} now due`, fresh.map(e => e.text).join("\n"), "devtrack-due");
+  }
+  store.set("devtrack-reminded", seen);
+}
+setInterval(checkReminders, 60_000);
+async function setReminders(on) {
+  if (on && "Notification" in window && Notification.permission === "default") await Notification.requestPermission();
+  look.remind = on; applyLook();
+  if (on) checkReminders();
+  if (state.view === "settings") render();
+}
+
 // ---------- glass dropdowns
 // The open list of a native <select> is drawn by the OS and can't be styled, so on mouse/trackpad
 // devices each select gets a button + menu. The hidden native select stays the source of truth:
@@ -1675,6 +1727,7 @@ $("#view").addEventListener("click", async e => {
     catch (err) { toast(err.message); }
     return render();
   }
+  if (t.closest("[data-remind-test]")) return checkReminders(true);
   const rvb = t.closest("[data-rv]"); if (rvb) {
     const n = +rvb.dataset.rv, base = parseISO(state.review.day || todayISO());
     state.review.day = n === 0 ? "" : toISO(addDays(base, 7 * n));
@@ -1717,6 +1770,7 @@ $("#view").addEventListener("change", e => {
   if (t.dataset.tl) { state.tl[t.dataset.tl] = t.value; return render(); }
   if (t.hasAttribute("data-tprio")) { state.tasks.priority = t.value; return render(); }
   if (["theme", "wall", "accent", "glass"].includes(t.name) && t.type === "radio") { look[t.name] = t.value; applyLook(); return render(); }
+  if (t.dataset.look === "remind") return setReminders(t.checked);
   if (t.dataset.look) { look[t.dataset.look] = t.checked; applyLook(); return; }
   if (t.name === "calMode") { state.cal.mode = t.value; return render(); }
   if (t.dataset.calType) { state.cal.types[t.dataset.calType] = t.checked; return render(); }
@@ -1837,4 +1891,5 @@ setInterval(() => {
   await loadFocus();
   await Promise.all([loadProjects(), loadTemplates()]);
   render();
+  checkReminders();
 })();

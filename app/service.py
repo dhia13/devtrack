@@ -685,6 +685,20 @@ def agenda(days: int = 7, project=None) -> dict:
     }
 
 
+def reminders(project=None) -> dict:
+    """What to remind the developer of today: milestones due today, overdue ones, and items
+    whose snooze ends today. `summary` is one line for a notification."""
+    a = agenda(days=0, project=project)
+    due = [e for e in a["upcoming"] if e["date"] == a["today"]]
+    back = [_compact(i) for i in list_items(project=project, limit=100_000) if i["snoozed_until"] == a["today"]]
+    parts = [f"{len(due)} due today" if due else "", f"{len(a['overdue'])} overdue" if a["overdue"] else "",
+             f"{len(back)} back from hold" if back else ""]
+    parts = [x for x in parts if x]
+    return {"today": a["today"], "due_today": due, "overdue": a["overdue"], "back_today": back,
+            "waiting_on_me": len(a["waiting_on_me"]),
+            "summary": ", ".join(parts).capitalize() + "." if parts else "Nothing due today."}
+
+
 def cost_summary(project=None) -> dict:
     items = list_items(project=project, include_closed=True, limit=100_000)
     by_project: dict[str, dict] = {}
@@ -829,8 +843,12 @@ def calendar_ics(project=None, include_closed: bool = False) -> str:
                 "DESCRIPTION:" + _ics_text("\n".join(desc)),
                 f"CATEGORIES:{kind},{_ics_text(it['project'])}",
                 "TRANSP:TRANSPARENT",
-                "END:VEVENT",
             ]
+            if config.ICS_ALERT and not done and it["status"] != "cancelled":
+                hh, mm = config.ICS_ALERT.split(":")
+                lines += ["BEGIN:VALARM", "ACTION:DISPLAY", f"TRIGGER;RELATED=START:PT{int(hh)}H{int(mm)}M",
+                          "DESCRIPTION:" + _ics_text(f"{kind.capitalize()} today: {it['title']}"), "END:VALARM"]
+            lines.append("END:VEVENT")
     lines.append("END:VCALENDAR")
     return "\r\n".join(_ics_fold(line) for line in lines) + "\r\n"
 

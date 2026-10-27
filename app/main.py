@@ -105,6 +105,7 @@ def meta():
         "statuses": s.STATUSES, "kinds": s.KINDS, "assignees": s.ASSIGNEES,
         "priorities": s.PRIORITIES, "note_kinds": s.NOTE_KINDS,
         "project_statuses": s.PROJECT_STATUSES, "currency": s.DEFAULT_CURRENCY,
+        "ics_alert": config.ICS_ALERT,
     }
 
 
@@ -249,6 +250,11 @@ def create_note(body: dict = Body(...)):
 @app.get("/api/agenda")
 def agenda(days: int = 14, project: str | None = None):
     return s.agenda(days, project)
+
+
+@app.get("/api/reminders")
+def reminders(project: str | None = None):
+    return s.reminders(project)
 
 
 @app.get("/api/review")
