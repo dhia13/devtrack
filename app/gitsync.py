@@ -87,8 +87,7 @@ def _default_branch(repo: Path) -> str:
 
 def _base_ref(repo: Path, base: str | None) -> str | None:
     """First word of base_branch (it is free text, e.g. "develop (ffbf9ba, ...)"), preferring origin/."""
-    name = (base or "").split()[0].rstrip(",;") if base and base.split() else _default_branch(repo)
-    name = name.split(":", 1)[-1].strip() or _default_branch(repo)
+    name = s.base_branch_name(base) or _default_branch(repo)
     for ref in (f"origin/{name}", name):
         if _ref_ok(repo, ref):
             return ref

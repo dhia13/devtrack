@@ -2,6 +2,7 @@
 
 import os
 import re
+import shlex
 from datetime import date, datetime, time, timedelta
 
 from .db import now, tx
@@ -50,6 +51,25 @@ class NotFound(LookupError):
 
 class Invalid(ValueError):
     pass
+
+
+# A branch or remote name git would accept (see git check-ref-format), so it is safe to put in a script.
+REF_RE = re.compile(r"(?!-)(?!.*\.\.)(?!.*@\{)(?!.*//)[A-Za-z0-9._/-]+(?<!\.lock)(?<![./])")
+REMOTE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def base_branch_name(base: str | None) -> str | None:
+    """The branch in a free-text base_branch such as "develop (ffbf9ba, ...)" or "origin:main"."""
+    words = (base or "").split()
+    if not words:
+        return None
+    return words[0].rstrip(",;").split(":", 1)[-1].strip() or None
+
+
+def _ref(value: str, what: str) -> str:
+    if not REF_RE.fullmatch(value):
+        raise Invalid(f"{what} {value!r} is not a valid git branch name")
+    return value
 
 
 # ---------------------------------------------------------------- parsing
@@ -491,7 +511,12 @@ def redate_plan(item_id: int, day=None, start: str = "09:00", end: str = "17:00"
     it = get_item(item_id, with_notes=False)
     if not it["branch"]:
         raise Invalid(f"item #{item_id} has no branch set")
-    base = it["base_branch"] or "main"
+    # Everything that reaches the script is either validated here or shell-quoted below:
+    # agents set these fields over MCP, and the developer runs the result in their shell.
+    branch = _ref(it["branch"], "branch")
+    base = _ref(base_branch_name(it["base_branch"]) or "main", "base_branch")
+    if not REMOTE_RE.fullmatch(remote or ""):
+        raise Invalid(f"remote {remote!r} is not a valid remote name")
     if day:
         target = parse_date(day)
     elif it["commit_date"]:
@@ -511,29 +536,31 @@ def redate_plan(item_id: int, day=None, start: str = "09:00", end: str = "17:00"
     offset = t0.strftime("%z")
     s0, s1 = int(t0.timestamp()), int(t1.timestamp())
     upstream = f"{remote}/{base}"
+    q_branch, q_upstream, q_remote = shlex.quote(branch), shlex.quote(upstream), shlex.quote(remote)
     exec_cmd = (
         'i=$(cat "$REDATE_F"); d="$(( ' + str(s0) + ' + i * REDATE_STEP )) ' + offset + '"; '
         'GIT_COMMITTER_DATE="$d" git commit --amend --no-edit --allow-empty --date="$d" >/dev/null; '
         'echo $((i + 1)) > "$REDATE_F"'
     )
+    title = " ".join(str(it["title"]).split())  # one line, so it stays a comment
     script = "\n".join([
-        f"# Item #{it['id']} {it['title']}",
-        f"# Rebase {it['branch']} onto {upstream} and date its commits {target:%a %d %b %Y} "
+        f"# Item #{it['id']} {title}",
+        f"# Rebase {branch} onto {upstream} and date its commits {target:%a %d %b %Y} "
         f"{t0:%H:%M}-{t1:%H:%M} ({offset}). Run in Git Bash from the repo root.",
         "set -euo pipefail",
-        f"git fetch {remote}",
-        f"git switch {it['branch']}",
-        f'n=$(git rev-list --count "{upstream}..HEAD")',
+        f"git fetch {q_remote}",
+        f"git switch {q_branch}",
+        f'n=$(git rev-list --count {shlex.quote(upstream + "..HEAD")})',
         'REDATE_F=$(mktemp); echo 0 > "$REDATE_F"',
         f"REDATE_STEP=$(( n > 1 ? ({s1} - {s0}) / (n - 1) : 0 ))",
         "export REDATE_F REDATE_STEP",
-        f"git rebase --force-rebase --exec '{exec_cmd}' \"{upstream}\"",
+        f"git rebase --force-rebase --exec {shlex.quote(exec_cmd)} {q_upstream}",
         'rm -f "$REDATE_F"',
-        f'git log --format="%h  %ad  %cd  %s" --date=iso "{upstream}..HEAD"',
-        f'echo "Check the dates above, then: git push --force-with-lease {remote} {it["branch"]}"',
+        f'git log --format="%h  %ad  %cd  %s" --date=iso {shlex.quote(upstream + "..HEAD")}',
+        f'echo {shlex.quote(f"Check the dates above, then: git push --force-with-lease {remote} {branch}")}',
     ])
     return {
-        "item_id": it["id"], "branch": it["branch"], "base": upstream,
+        "item_id": it["id"], "branch": branch, "base": upstream,
         "date": target.isoformat(), "window": f"{t0:%H:%M}-{t1:%H:%M} {offset}",
         "script": script,
         "after": f"Once pushed, set item #{it['id']} status to 'submitted' (and pr_url).",

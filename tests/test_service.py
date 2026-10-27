@@ -89,6 +89,26 @@ def test_parked_sets_built_on_and_needs_redate():
     assert "git rebase" in plan["script"] and plan["date"] == iso(5)
 
 
+def test_redate_script_keeps_fields_out_of_the_shell():
+    it = s.create_item("demo", "title\nrm -rf ~", branch="feat/x", base_branch="develop (ffbf9ba, from Ana)", submit_on=iso(1))
+    script = s.redate_plan(it["id"])["script"]
+    assert "\nrm -rf" not in script  # the title stays on its comment line
+    assert "git switch feat/x" in script and "origin/develop" in script
+
+
+@pytest.mark.parametrize("branch", ["b; touch /tmp/pwn", "$(id)", "-x", "a..b", "feat/x.lock", "a b"])
+def test_redate_rejects_unsafe_branch(branch):
+    it = s.create_item("demo", "t", branch=branch, submit_on=iso(1))
+    with pytest.raises(s.Invalid):
+        s.redate_plan(it["id"])
+
+
+def test_redate_rejects_unsafe_remote():
+    it = s.create_item("demo", "t", branch="feat/x", submit_on=iso(1))
+    with pytest.raises(s.Invalid):
+        s.redate_plan(it["id"], remote="origin; id")
+
+
 def test_ics_escapes_text():
     s.create_item("demo", "a, b; c", due_on=iso(1), branch="feat/x")
     ics = s.calendar_ics("demo")
