@@ -110,6 +110,7 @@ def create_item(
     waiting_for: str | None = None,
     snoozed_until: str | None = None,
     repeat_every: str | None = None,
+    blocked_by: list[int] | None = None,
 ) -> dict:
     """Track a unit of work (ticket, feature, bug, follow-up, deploy). Unknown project slugs are
     created. assignee='me' means the developer has to do it.
@@ -119,8 +120,11 @@ def create_item(
     waiting_for = who it waits on (e.g. "shop", "ops", "SATIM"); snoozed_until = check-back date.
     Either one puts the item on hold, out of the developer's to-do list until that date.
     repeat_every = "weekly", "monthly", "90d", "2w", ...: marking it done schedules the next copy
-    with its dates moved on by that much (renewals, recurring deploys, monthly reviews)."""
+    with its dates moved on by that much (renewals, recurring deploys, monthly reviews).
+    blocked_by = item ids this can't start before; it goes to 'blocked' and back to 'todo' by
+    itself once they are all merged, deployed, done or cancelled."""
     return s.create_item(project, title, **_given(waiting_for=waiting_for, snoozed_until=snoozed_until, repeat_every=repeat_every,
+        blocked_by=blocked_by,
         description=description, kind=kind, status=status, assignee=assignee, priority=priority,
         ticket_ref=ticket_ref, branch=branch, base_branch=base_branch, pr_url=pr_url,
         built_on=built_on, submit_on=submit_on, commit_date=commit_date, merge_on=merge_on,
@@ -158,13 +162,16 @@ def update_item(
     waiting_for: str | None = None,
     snoozed_until: str | None = None,
     repeat_every: str | None = None,
+    blocked_by: list[int] | None = None,
 ) -> dict:
     """Update an item. Omitted fields are unchanged; pass "" to clear a text/date field.
     `note` adds a progress note to the item's history in the same call.
     waiting_for / snoozed_until put it on hold (pass "" to both to take it off hold).
-    repeat_every makes it recurring ("" stops it); finishing it returns next_occurrence."""
+    repeat_every makes it recurring ("" stops it); finishing it returns next_occurrence.
+    blocked_by replaces the item's blockers ([] clears them). Finishing an item returns `unblocked`,
+    the ids of items that were only waiting on it."""
     return s.update_item(item_id, project=project, note=note, author=author, **_given(
-        waiting_for=waiting_for, snoozed_until=snoozed_until, repeat_every=repeat_every,
+        waiting_for=waiting_for, snoozed_until=snoozed_until, repeat_every=repeat_every, blocked_by=blocked_by,
         title=title, description=description, kind=kind, status=status, assignee=assignee,
         priority=priority, ticket_ref=ticket_ref, branch=branch, base_branch=base_branch,
         pr_url=pr_url, built_on=built_on, submit_on=submit_on, commit_date=commit_date,

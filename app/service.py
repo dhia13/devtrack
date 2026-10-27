@@ -187,6 +187,8 @@ def _item_dict(row) -> dict:
     it["git"] = git if git.get("checked_at") else None
     if it["git"]:
         it["git"]["repos"] = [r for r in (it["git"]["repos"] or "").splitlines() if r]
+    it["blocked_by"] = [int(x) for x in (it.pop("dep_all") or "").split(",") if x]
+    it["blocked_by_open"] = [int(x) for x in (it.pop("dep_open") or "").split(",") if x]
     it["needs_redate"] = bool(
         it["branch"] and rank < RANK["submitted"] and it["status"] != "cancelled" and (
             it["status"] == "parked"
@@ -198,8 +200,14 @@ def _item_dict(row) -> dict:
 
 GIT_COLS = ("repos", "head_sha", "last_commit_at", "ahead", "behind", "base_ref", "unpushed", "on_remote",
             "early_commits", "mr_url", "mr_state", "mr_merged_at", "error", "checked_at")
+# A blocker counts as finished once it is merged (the code exists) or closed.
+DEP_DONE = tuple(s for s in STATUSES if RANK[s] >= RANK["merged"])
+_DEP_DONE_SQL = ", ".join(repr(x) for x in DEP_DONE)
 ITEM_SELECT = f"""
-SELECT i.*, p.slug AS project, p.name AS project_name, {", ".join(f"g.{c} AS git_{c}" for c in GIT_COLS)}
+SELECT i.*, p.slug AS project, p.name AS project_name, {", ".join(f"g.{c} AS git_{c}" for c in GIT_COLS)},
+  (SELECT group_concat(d.blocked_by) FROM (SELECT blocked_by FROM item_deps WHERE item_id = i.id ORDER BY blocked_by) d) AS dep_all,
+  (SELECT group_concat(d.blocked_by) FROM (SELECT x.blocked_by FROM item_deps x JOIN items b ON b.id = x.blocked_by
+     WHERE x.item_id = i.id AND b.status NOT IN ({_DEP_DONE_SQL}) ORDER BY x.blocked_by) d) AS dep_open
 FROM items i JOIN projects p ON p.id = i.project_id
 LEFT JOIN git_status g ON g.item_id = i.id
 """
@@ -357,10 +365,70 @@ def get_item(item_id: int, with_notes: bool = True) -> dict:
         return it
 
 
+def parse_ids(value) -> list[int]:
+    """[12, 15], "12, 15" or "#12 #15" -> [12, 15]."""
+    if value is None or value == "":
+        return []
+    parts = value if isinstance(value, (list, tuple)) else re.split(r"[\s,;]+", str(value).strip())
+    out = []
+    for p in parts:
+        s = str(p).strip().lstrip("#")
+        if not s:
+            continue
+        if not s.isdigit():
+            raise Invalid(f"blocked_by takes item numbers like #12, not {p!r}")
+        out.append(int(s))
+    return sorted(set(out))
+
+
+def _set_blockers(conn, it: dict, value, author=None) -> None:
+    """Replace the item's blockers. An open item with unfinished blockers becomes 'blocked'."""
+    ids = parse_ids(value)
+    for b in ids:
+        if b == it["id"]:
+            raise Invalid("an item can't block itself")
+        _fetch_item(conn, b)  # NotFound for a missing number
+    # Refuse cycles: nothing this item (transitively) blocks may block it.
+    seen, todo = set(), [it["id"]]
+    while todo:
+        cur = todo.pop()
+        for (dep,) in conn.execute("SELECT item_id FROM item_deps WHERE blocked_by = ?", (cur,)):
+            if dep in ids:
+                raise Invalid(f"#{dep} already waits on #{it['id']}, so it can't block it")
+            if dep not in seen:
+                seen.add(dep)
+                todo.append(dep)
+    before = {r[0] for r in conn.execute("SELECT blocked_by FROM item_deps WHERE item_id = ?", (it["id"],))}
+    conn.execute("DELETE FROM item_deps WHERE item_id = ?", (it["id"],))
+    conn.executemany("INSERT INTO item_deps (item_id, blocked_by) VALUES (?, ?)", [(it["id"], b) for b in ids])
+    fresh = _fetch_item(conn, it["id"])
+    added = set(ids) - before  # re-saving the same list (the dialog does) mustn't undo a manual status
+    if (added & set(fresh["blocked_by_open"]) and RANK[fresh["status"]] < RANK["submitted"]
+            and fresh["status"] != "blocked"):
+        conn.execute("UPDATE items SET status = 'blocked', updated_at = ? WHERE id = ?", (now(), it["id"]))
+        refs = ", ".join(f"#{b}" for b in fresh["blocked_by_open"])
+        _insert_note(conn, it["project_id"], f"Blocked by {refs}.", "blocker", it["id"], author or "devtrack")
+
+
+def _unblock_dependents(conn, blocker: dict) -> list[int]:
+    """When a blocker finishes, move items it was the last open blocker of from blocked to todo."""
+    freed = []
+    for (dep_id,) in conn.execute("SELECT item_id FROM item_deps WHERE blocked_by = ?", (blocker["id"],)).fetchall():
+        dep = _fetch_item(conn, dep_id)
+        if dep["status"] == "blocked" and not dep["blocked_by_open"]:
+            conn.execute("UPDATE items SET status = 'todo', updated_at = ? WHERE id = ?", (now(), dep_id))
+            _insert_note(conn, dep["project_id"], f"Unblocked: #{blocker['id']} is {blocker['status']}.", "info", dep_id, "devtrack")
+            freed.append(dep_id)
+    return freed
+
+
 def create_item(project, title: str, **fields) -> dict:
+    blocked_by = fields.pop("blocked_by", None)
     with tx() as conn:
         p = _ensure_project(conn, project)
         item_id = _insert_item(conn, p["id"], {"title": title, **fields})
+        if blocked_by not in (None, "", []):
+            _set_blockers(conn, _fetch_item(conn, item_id), blocked_by)
         return _fetch_item(conn, item_id)
 
 
@@ -393,6 +461,7 @@ def _next_occurrence(conn, it: dict) -> dict:
 
 
 def update_item(item_id: int, project=None, note: str | None = None, author: str | None = None, **fields) -> dict:
+    blocked_by = fields.pop("blocked_by", None)
     with tx() as conn:
         current = _fetch_item(conn, item_id)
         changes = _clean_item(fields)
@@ -414,7 +483,12 @@ def update_item(item_id: int, project=None, note: str | None = None, author: str
             )
         if note:
             _insert_note(conn, current["project_id"], note, "progress", current["id"], author)
+        if blocked_by is not None:
+            _set_blockers(conn, current, blocked_by, author)
         updated = _fetch_item(conn, current["id"])
+        if status in DEP_DONE and current["status"] not in DEP_DONE:
+            if freed := _unblock_dependents(conn, updated):
+                updated["unblocked"] = freed
         # Reopening and finishing again doesn't make a second copy.
         if (status == "done" and current["status"] != "done" and updated["repeat_every"]
                 and not conn.execute("SELECT 1 FROM items WHERE repeat_of = ?", (current["id"],)).fetchone()):
@@ -425,7 +499,13 @@ def update_item(item_id: int, project=None, note: str | None = None, author: str
 def delete_item(item_id: int) -> None:
     with tx() as conn:
         _fetch_item(conn, item_id)
+        waiting = [r[0] for r in conn.execute("SELECT item_id FROM item_deps WHERE blocked_by = ?", (int(item_id),))]
         conn.execute("DELETE FROM items WHERE id = ?", (int(item_id),))
+        for dep_id in waiting:
+            dep = _fetch_item(conn, dep_id)
+            if dep["status"] == "blocked" and not dep["blocked_by_open"]:
+                conn.execute("UPDATE items SET status = 'todo', updated_at = ? WHERE id = ?", (now(), dep_id))
+                _insert_note(conn, dep["project_id"], f"Unblocked: #{item_id} was deleted.", "info", dep_id, "devtrack")
 
 
 # ---------------------------------------------------------------- notes
@@ -508,7 +588,7 @@ def handoff(project, summary: str, author=None, done=None, next_steps=None,
 def _compact(it: dict) -> dict:
     keys = ("id", "project", "title", "status", "assignee", "priority", "kind", "branch",
             "submit_on", "merge_on", "deploy_on", "due_on", "needs_redate", "pr_url",
-            "waiting_for", "snoozed_until", "on_hold", "back_today", "repeat_every")
+            "waiting_for", "snoozed_until", "on_hold", "back_today", "repeat_every", "blocked_by_open")
     out = {k: it[k] for k in keys}
     g = it.get("git")
     if g:
@@ -642,6 +722,7 @@ def export_all() -> dict:
             "items": [dict(r) for r in conn.execute("SELECT * FROM items ORDER BY id")],
             "notes": [dict(r) for r in conn.execute("SELECT * FROM notes ORDER BY id")],
             "focus_sessions": [dict(r) for r in conn.execute("SELECT * FROM focus_sessions ORDER BY id")],
+            "item_deps": [dict(r) for r in conn.execute("SELECT * FROM item_deps ORDER BY item_id, blocked_by")],
         }
 
 

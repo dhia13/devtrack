@@ -98,6 +98,7 @@ try { const a = JSON.parse(localStorage.getItem("devtrack-look") || "{}"), r = d
           <label class="prop"><span>Kind</span><select name="kind"></select></label>
           <label class="prop"><span>Project</span><select name="project" required></select></label>
           <label class="prop"><span>Ticket</span><input name="ticket_ref" placeholder="UB-123"></label>
+          <label class="prop" title="Items this one can't start before. It moves to blocked, and back to todo once they are merged or done."><span>Blocked by</span><input name="blocked_by" placeholder="#12, #15" inputmode="numeric"></label>
         </div>
         <div class="side-group">
           <h5>Schedule</h5>

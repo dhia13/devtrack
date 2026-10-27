@@ -664,6 +664,7 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line-st
 .dd-opt.act { background: var(--hover); }
 .dd-opt[aria-selected="true"] { font-weight: 650; }
 .dd-opt[aria-disabled="true"] { opacity: .45; cursor: default; }
+.tag.dep { border-color: color-mix(in srgb, var(--danger) 50%, transparent); color: var(--danger); }
 .bell-menu { padding: 6px; }
 .bell-h { padding: 6px 10px 8px; font-size: 13px; font-weight: 650; color: var(--muted); }
 .bell-h b { color: var(--text); margin-left: 4px; }

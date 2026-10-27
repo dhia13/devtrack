@@ -120,3 +120,15 @@ def test_bell_lists_what_waits_on_you(server, page):
     page.locator("#itemDlg[open]").wait_for()
     assert page.input_value("#itemForm [name=title]") == "Approve the store listing"
     assert page.errors == []
+
+
+def test_blocked_by_field_round_trips(server, page):
+    first = _api(server, "/api/items", {"project": "demo", "title": "Write the API"})
+    second = _api(server, "/api/items", {"project": "demo", "title": "Build the screen", "blocked_by": [first["id"]]})
+    page.reload()
+    page.click('#nav button[data-view="tasks"]')
+    page.get_by_text(f"blocked by #{first['id']}").first.wait_for()
+    page.evaluate(f"openItem({second['id']})")
+    page.locator("#itemDlg[open]").wait_for()
+    assert page.input_value("#itemForm [name=blocked_by]") == f"#{first['id']}"
+    assert page.errors == []

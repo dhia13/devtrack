@@ -49,8 +49,10 @@ function holdDate(k) {
 const holdTag = it => it.on_hold
   ? `<span class="tag hold" title="On hold${it.snoozed_until ? " until " + fmtDate(it.snoozed_until) : ""}">${it.waiting_for ? "waiting: " + esc(it.waiting_for) : "snoozed"}${it.snoozed_until ? " · " + fmtDate(it.snoozed_until, { day: "numeric", month: "short" }) : ""}</span>`
   : it.back_today ? `<span class="tag back" title="Its check-back day has come">back${it.waiting_for ? " from " + esc(it.waiting_for) : ""}</span>` : "";
+const depTag = it => it.blocked_by_open?.length ? `<span class="tag dep" title="Waiting on ${it.blocked_by_open.map(i => "#" + i).join(", ")}">blocked by ${it.blocked_by_open.map(i => "#" + i).join(" ")}</span>` : "";
 const repeatTag = it => it.repeat_every ? `<span class="tag" title="Repeats every ${esc(it.repeat_every)}: finishing it schedules the next one">↻ ${esc(it.repeat_every)}</span>` : "";
-const nextNote = saved => saved.next_occurrence ? ` · next #${saved.next_occurrence.id}${saved.next_occurrence.due_on ? " due " + fmtDate(saved.next_occurrence.due_on) : ""}` : "";
+const nextNote = saved => (saved.next_occurrence ? ` · next #${saved.next_occurrence.id}${saved.next_occurrence.due_on ? " due " + fmtDate(saved.next_occurrence.due_on) : ""}` : "")
+  + (saved.unblocked?.length ? ` · unblocked ${saved.unblocked.map(i => "#" + i).join(" ")}` : "");
 const holdBtn = it => `<button type="button" class="ibtn" data-hold="${it.id}" title="${it.on_hold ? "Change hold" : "Put on hold"}" aria-label="Put ${esc(it.title)} on hold">${CLOCK}</button>`;
 state.waitingVals = new Set();
 const noteWaiting = list => list.forEach(i => i.waiting_for && state.waitingVals.add(i.waiting_for));
@@ -522,7 +524,7 @@ const views = {
     const myTasks = mine.slice(0, showN).map(it => `<div class="task" data-item="${it.id}">
         <input type="checkbox" class="round" data-done="${it.id}" title="Mark done" aria-label="Mark ${esc(it.title)} done">
         <span class="t"><span class="title">${esc(it.title)}</span>
-          <span class="sub">${pchip(it.project)}${it.due_on ? `<span class="${it.due_on < today ? "late" : ""}">${it.due_on === today ? "Today" : rel(it.due_on)}</span>` : ""}${holdTag(it)}${repeatTag(it)}</span></span>
+          <span class="sub">${pchip(it.project)}${it.due_on ? `<span class="${it.due_on < today ? "late" : ""}">${it.due_on === today ? "Today" : rel(it.due_on)}</span>` : ""}${holdTag(it)}${repeatTag(it)}${depTag(it)}</span></span>
         ${flag(it.priority)}${holdBtn(it)}</div>`).join("") || `<div class="empty">Nothing waiting on you.</div>`;
     noteWaiting(a.on_hold);
     // focus card
@@ -596,7 +598,7 @@ const views = {
     const card = it => {
       const { total, done } = checklist(it.description), nm = it.next_milestone, closed = it.status === "done";
       const d = closed ? (it.completed_at ? `Done ${fmtDate(it.completed_at, { day: "numeric", month: "short" })}` : "Done") : nm ? `${nm.type} ${nm.date === today ? "today" : fmtDate(nm.date, { day: "numeric", month: "short" })}` : "";
-      const gb = gitBadges(it), hold = holdTag(it) + repeatTag(it);
+      const gb = gitBadges(it), hold = holdTag(it) + repeatTag(it) + depTag(it);
       return `<div class="kcard${closed ? " closed" : ""}${it.on_hold ? " held" : ""}" draggable="true" data-item="${it.id}" data-status="${it.status}">
         <div class="top">${pchip(it.project, true)}${flag(it.priority)}</div>
         <div class="title">${esc(it.title)}</div>
@@ -784,7 +786,7 @@ const views = {
     const itemRow = (it, check) => `<div class="row" data-item="${it.id}">
         ${check ? `<input type="checkbox" class="round" data-done="${it.id}" title="Mark done" aria-label="Mark ${esc(it.title)} done">` : ""}
         <span class="t"><span class="title">${esc(it.title)}</span>
-          <span class="sub"><span class="proj">${esc(it.project)}</span>${it.branch ? `<span class="mono">${esc(it.branch)}</span>` : ""}${it.submit_on ? `<span>submit ${fmtDate(it.submit_on)}</span>` : ""}${it.due_on ? `<span class="${it.due_on < a.today ? "late" : ""}">due ${fmtDate(it.due_on)}</span>` : ""}${holdTag(it)}${repeatTag(it)}${gitBadges(it)}</span></span>
+          <span class="sub"><span class="proj">${esc(it.project)}</span>${it.branch ? `<span class="mono">${esc(it.branch)}</span>` : ""}${it.submit_on ? `<span>submit ${fmtDate(it.submit_on)}</span>` : ""}${it.due_on ? `<span class="${it.due_on < a.today ? "late" : ""}">due ${fmtDate(it.due_on)}</span>` : ""}${holdTag(it)}${repeatTag(it)}${depTag(it)}${gitBadges(it)}</span></span>
         <span class="right">${it.assignee === "me" ? holdBtn(it) : ""}${statusChip(it.status)}</span></div>`;
     noteWaiting(a.on_hold);
     const byWait = {};
@@ -1087,7 +1089,7 @@ async function quickCheck(cb) {
 // ---------- item dialog
 const itemDlg = $("#itemDlg"), itemForm = $("#itemForm");
 let editing = null, dirty = false;
-const ITEM_KEYS = ["title","project","kind","status","assignee","priority","ticket_ref","description","branch","base_branch","built_on","pr_url","commit_date","submit_on","merge_on","deploy_on","due_on","estimate_hours","actual_hours","cost","currency","waiting_for","snoozed_until","repeat_every"];
+const ITEM_KEYS = ["title","project","kind","status","assignee","priority","ticket_ref","description","branch","base_branch","built_on","pr_url","commit_date","submit_on","merge_on","deploy_on","due_on","estimate_hours","actual_hours","cost","currency","waiting_for","snoozed_until","repeat_every","blocked_by"];
 const fillSelect = (sel, values) => sel.innerHTML = values.map(v => `<option value="${esc(v)}">${esc(label(v))}</option>`).join("");
 const fit = ta => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
 function paintStatus() { const s = itemForm.status; s.className = "status-select s-" + s.value; }
@@ -1110,7 +1112,7 @@ async function openItem(id, preset = {}) {
   fillSelect(itemForm.priority, state.meta.priorities);
   fillSelect(itemForm.kind, state.meta.kinds);
   itemForm.reset();
-  ITEM_KEYS.forEach(k => { if (k !== "description") itemForm[k].value = k === "commit_date" ? (it[k] || "").slice(0, 16) : (it[k] ?? ""); });
+  ITEM_KEYS.forEach(k => { if (k !== "description") itemForm[k].value = k === "commit_date" ? (it[k] || "").slice(0, 16) : k === "blocked_by" ? (it[k] || []).map(i => "#" + i).join(", ") : (it[k] ?? ""); });
   setEditor(itemForm.description, it.description);
   setEditor(itemForm.noteBody, "");
   $("#itemCrumbs").innerHTML = editing
@@ -1283,7 +1285,7 @@ async function ckRender() {
   const qProj = quick && (quick.fields.project || projectFilter.value || state.projects[0]?.slug);
   ckItems = [
     ...strong.slice(0, q ? 6 : 30).map(c => ({ sec: "Commands", ...c, sub: c.s ? esc(c.s) : "" })),
-    ...found.slice(0, 8).map(it => ({ sec: "Items", k: "item", t: `#${it.id} ${it.title}`, sub: `${pchip(it.project)}${statusChip(it.status)}${holdTag(it)}${repeatTag(it)}`, run: () => openItem(it.id) })),
+    ...found.slice(0, 8).map(it => ({ sec: "Items", k: "item", t: `#${it.id} ${it.title}`, sub: `${pchip(it.project)}${statusChip(it.status)}${holdTag(it)}${repeatTag(it)}${depTag(it)}`, run: () => openItem(it.id) })),
     ...(quick && quick.title ? [{ sec: "Create", k: "plus", t: `New item: ${quick.title}`, kbd: "Shift ↵",
         sub: pchip(qProj) + quick.chips.map(c => `<span class="tag">${esc(c)}</span>`).join(""), run: () => quickCreate(quick, qProj) }] : []),
     ...cmds.slice(0, 5).map(c => ({ sec: "More commands", ...c, sub: c.s ? esc(c.s) : "" })),

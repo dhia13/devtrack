@@ -66,6 +66,14 @@ CREATE TABLE IF NOT EXISTS notes (
 CREATE INDEX IF NOT EXISTS notes_project ON notes(project_id, created_at);
 CREATE INDEX IF NOT EXISTS notes_item ON notes(item_id);
 
+-- "item_id can't move until blocked_by is finished" (merged or later, or cancelled).
+CREATE TABLE IF NOT EXISTS item_deps (
+    item_id    INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    blocked_by INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    PRIMARY KEY (item_id, blocked_by)
+);
+CREATE INDEX IF NOT EXISTS item_deps_blocker ON item_deps(blocked_by);
+
 -- Focus timer sessions (the island). item_id is optional; project_id follows the item.
 CREATE TABLE IF NOT EXISTS focus_sessions (
     id         INTEGER PRIMARY KEY,

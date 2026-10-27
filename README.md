@@ -52,6 +52,7 @@ instructions file, with `<slug>` set to that project's slug.
 | `merge_on`, `deploy_on`, `due_on` | planned milestones; they show on the agenda until reached |
 | `estimate_hours`, `actual_hours`, `cost`, `currency` | effort and cost, summed per project |
 | `waiting_for`, `snoozed_until` | on hold: who it waits on, and when to check back (see below) |
+| `blocked_by` | item numbers it can't start before (`#12, #15`): see [Dependencies](#dependencies) |
 | `repeat_every` | `daily`, `weekly`, `monthly`, `yearly`, or `90d`, `2w`, `3m`: see [Recurring items](#recurring-items) |
 
 Dates accept `YYYY-MM-DD`, `today`, `tomorrow`, `+3d`, `friday`, `next friday`.
@@ -99,6 +100,14 @@ The focus timer (the island at the top) saves every finished block to DevTrack, 
 when you start it from one. Ending a block also offers to add its minutes to the item's actual
 hours. **Insights → Time by project** shows focus hours per project for the chosen range, and, for
 items finished in it, estimate vs actual hours and cost, with a CSV download (`/api/time.csv`).
+
+## Dependencies
+
+Set **Blocked by** in the item dialog (or `blocked_by` over the API and MCP) to the items this one
+waits on. An open item with an unfinished blocker moves to `blocked`, with a note. Once every
+blocker is merged, deployed, done or cancelled (or deleted), it moves back to `todo` by itself,
+with a note naming the blocker, and the finishing call returns `unblocked` with its number. An
+item you moved on by hand (say to `in_progress`) is left alone. Cycles are refused.
 
 ## Recurring items
 
