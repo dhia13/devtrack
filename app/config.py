@@ -42,6 +42,10 @@ DEFAULT_CURRENCY = _str("DEVTRACK_CURRENCY", "USD") or "USD"
 
 # ---- HTTP: host names the app answers to (blocks DNS rebinding, see README "Security")
 ALLOWED_HOSTS = _list("DEVTRACK_ALLOWED_HOSTS", "localhost,127.0.0.1")
+# Shared access token; empty = no login (only safe while the port is bound to localhost)
+TOKEN = _str("DEVTRACK_TOKEN")
+if TOKEN and len(TOKEN) < 16:
+    raise ConfigError("DEVTRACK_TOKEN must be at least 16 characters (try: openssl rand -hex 24)")
 
 # ---- backups
 BACKUP_DIR = Path(_str("DEVTRACK_BACKUP_DIR", "/backups"))

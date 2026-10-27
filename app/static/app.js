@@ -196,6 +196,7 @@ setInterval(() => { if (focusS && focusS.endsAt && focusLeft() <= 0) finishFocus
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts, body: opts.body && JSON.stringify(opts.body) });
+  if (res.status === 401) { location.href = "/login"; throw new Error("signed out"); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || data.detail?.[0]?.msg || res.statusText);
   return data;
