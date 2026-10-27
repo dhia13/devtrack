@@ -104,3 +104,19 @@ def test_repeating_item_shows_its_period(server, page):
     page.click('#nav button[data-view="tasks"]')
     page.get_by_text("↻ 1w").first.wait_for()
     assert page.errors == []
+
+
+def test_bell_lists_what_waits_on_you(server, page):
+    _api(server, "/api/items", {"project": "demo", "title": "Approve the store listing", "assignee": "me", "due_on": "today"})
+    page.reload()
+    page.click("#tBell")
+    menu = page.locator("#bellMenu")
+    menu.get_by_text("Approve the store listing").wait_for()
+    assert page.get_attribute("#tBell", "aria-expanded") == "true"
+    page.keyboard.press("Escape")
+    menu.wait_for(state="hidden")
+    page.click("#tBell")
+    menu.get_by_text("Approve the store listing").click()  # opens the item
+    page.locator("#itemDlg[open]").wait_for()
+    assert page.input_value("#itemForm [name=title]") == "Approve the store listing"
+    assert page.errors == []
