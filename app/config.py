@@ -39,6 +39,9 @@ def _list(name: str, default: str) -> list[str]:
 DB_PATH = _str("DEVTRACK_DB", "/data/devtrack.db")
 SEED_PROJECTS = _list("DEVTRACK_SEED_PROJECTS", "")
 DEFAULT_CURRENCY = _str("DEVTRACK_CURRENCY", "USD") or "USD"
+# Invoices: who they are from (write \n between lines) and the rate for items with hours but no cost.
+INVOICE_FROM = _str("DEVTRACK_INVOICE_FROM").replace("\\n", "\n")
+HOURLY_RATE = _num("DEVTRACK_HOURLY_RATE", 0, minimum=0)
 
 # ---- HTTP: host names the app answers to (blocks DNS rebinding, see README "Security")
 ALLOWED_HOSTS = _list("DEVTRACK_ALLOWED_HOSTS", "localhost,127.0.0.1")

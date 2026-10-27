@@ -70,6 +70,7 @@ Dates accept `YYYY-MM-DD`, `today`, `tomorrow`, `+3d`, `friday`, `next friday`.
 | `redate_plan` | Script that rebases a parked branch and spreads its commit dates over the submit day |
 | `git_sync` | Refresh branch and MR state now instead of at the next 15-minute run |
 | `time_report` | Focus hours per project, and estimate vs actual for items finished in a date range |
+| `invoice` | A project's finished items in a date range with hours, amounts and totals, for billing |
 | `weekly_review` | One week's finished, started and slipped work, decisions, hours, and next week, with a Markdown summary |
 | `list_templates`, `create_from_template` | Reusable checklists: create a "Release" or "Store submission" item in one call |
 
@@ -102,6 +103,17 @@ The focus timer (the island at the top) saves every finished block to DevTrack, 
 when you start it from one. Ending a block also offers to add its minutes to the item's actual
 hours. **Insights → Time by project** shows focus hours per project for the chosen range, and, for
 items finished in it, estimate vs actual hours and cost, with a CSV download (`/api/time.csv`).
+
+## Invoices
+
+Each project row in **Insights → Time by project** with finished items has an **Invoice** link,
+and the command bar has **Invoice <project>** for this month so far. It opens a printable page:
+the items finished in the range, with their ticket, done date, actual hours and amount, and
+totals. An item's amount is its `cost`, or its actual hours times the hourly rate when it has no
+cost. Change the dates, rate or invoice number at the top, then **Print or save as PDF**, or take
+the **CSV**. Set `DEVTRACK_HOURLY_RATE` for a default rate and `DEVTRACK_INVOICE_FROM` for your
+name and address (`\n` between lines) in `.env`. The bill-to line is the project's name. Agents
+call `invoice`; the API is `/api/invoice`, `/api/invoice.csv` and `/api/invoice.html`.
 
 ## Weekly review
 

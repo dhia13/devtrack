@@ -634,13 +634,14 @@ const views = {
     const pf = projectFilter.value, trRows = tr.projects.filter(r => !pf || r.project === pf);
     const acc = r => r.paired ? Math.round(r.paired_actual / r.paired_estimate * 100) : null;
     const timeTable = trRows.length ? `<div class="tablewrap"><table>
-        <thead><tr><th>Project</th><th class="num">Focus</th><th class="num">Sessions</th><th class="num">Finished</th><th class="num">Estimate</th><th class="num">Actual</th><th class="num" title="For finished items that have both an estimate and actual hours: actual as a share of the estimate">Actual vs estimate</th><th class="num">Cost</th></tr></thead>
+        <thead><tr><th>Project</th><th class="num">Focus</th><th class="num">Sessions</th><th class="num">Finished</th><th class="num">Estimate</th><th class="num">Actual</th><th class="num" title="For finished items that have both an estimate and actual hours: actual as a share of the estimate">Actual vs estimate</th><th class="num">Cost</th><th><span class="sr-only">Invoice</span></th></tr></thead>
         <tbody>${trRows.map(r => `<tr ${r.project !== "(no item)" ? `data-filter-project="${esc(r.project)}"` : ""}>
           <td>${r.project === "(no item)" ? `<span class="muted">Focus with no item</span>` : pchip(r.project)}</td>
           <td class="num">${r.focus_minutes ? (r.focus_minutes / 60).toFixed(1) + "h" : "–"}</td><td class="num">${r.sessions || "–"}</td>
           <td class="num">${r.finished || "–"}</td><td class="num">${hours(r.estimate_hours) || "–"}</td><td class="num">${hours(r.actual_hours) || "–"}</td>
           <td class="num" title="${r.paired ? `${r.paired} item${r.paired === 1 ? "" : "s"} with both numbers` : "No finished item has both an estimate and actual hours"}">${acc(r) === null ? "–" : `<span class="${acc(r) > 120 ? "late" : ""}">${acc(r)}%</span> <span class="muted" style="font-size:12px">of ${r.paired}</span>`}</td>
-          <td class="num">${Object.entries(r.cost).map(([k, v]) => money(v, k)).join(" · ") || "–"}</td></tr>`).join("")}</tbody></table></div>`
+          <td class="num">${Object.entries(r.cost).map(([k, v]) => money(v, k)).join(" · ") || "–"}</td>
+          <td class="num">${r.project !== "(no item)" && r.finished ? `<a class="btn sm ghost" href="/api/invoice.html?${new URLSearchParams({ project: r.project, start, end: today })}" target="_blank" rel="noopener" title="Printable invoice for the items finished in this range">Invoice</a>` : ""}</td></tr>`).join("")}</tbody></table></div>`
       : `<div class="empty">No focus sessions or finished items in this range.</div>`;
     const inP = (d, a, b) => d && d >= a && d <= b, pend = toISO(addDays(parseISO(start), -1));
     const cur = items.filter(i => inP(doneDay(i), start, today)), prev = items.filter(i => inP(doneDay(i), pstart, pend));
@@ -1297,6 +1298,7 @@ const ICON = {
   focus: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/>', git: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 5-8 3-12 7"/>',
   disk: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/>', theme: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/>',
   proj: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  bill: '<path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h3"/>',
 };
 const ic = k => `<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg></span>`;
 const VIEW_NAMES = { home: "Home", tasks: "Tasks", agenda: "Agenda", calendar: "Calendar", projects: "Projects", insights: "Insights", review: "Weekly review", activity: "Activity", settings: "Settings" };
@@ -1335,6 +1337,7 @@ function ckCommands() {
     ...VIEWS.map((v, i) => ({ k: "go", t: `Go to ${VIEW_NAMES[v]}`, kbd: String(i + 1), run: () => { state.view = v; render(); } })),
     { k: "proj", t: "Show all projects", run: () => { projectFilter.value = ""; render(); } },
     ...state.projects.map(p => ({ k: "proj", t: `Show ${p.name}`, s: `${p.open_items || 0} open · ${p.my_items || 0} on you`, run: () => { projectFilter.value = p.slug; render(); } })),
+    ...state.projects.map(p => ({ k: "bill", t: `Invoice ${p.name}`, s: "This month so far, to print or save as PDF", run: () => open(`/api/invoice.html?project=${encodeURIComponent(p.slug)}`, "_blank", "noopener") })),
   ];
 }
 const fuzzy = (q, t) => { q = q.toLowerCase(); t = t.toLowerCase(); let i = 0; for (const ch of t) if (ch === q[i]) i++; return i === q.length; };
@@ -1701,7 +1704,7 @@ $("#view").addEventListener("click", async e => {
   const bulk = t.closest("[data-bulk]"); if (bulk) return runBulk(bulk.dataset.bulk);
   const item = t.closest("[data-item]"); if (item && !t.closest("a[href^=http]")) { e.preventDefault(); return openItem(item.dataset.item); }
   const proj = t.closest("[data-proj]"); if (proj) return openProject(proj.dataset.proj);
-  const fp = t.closest("[data-filter-project]"); if (fp) { projectFilter.value = fp.dataset.filterProject; state.view = "tasks"; return render(); }
+  const fp = !t.closest("a[href]") && t.closest("[data-filter-project]"); if (fp) { projectFilter.value = fp.dataset.filterProject; state.view = "tasks"; return render(); }
   if (t.id === "addProj") openProject(null);
 });
 $("#view").addEventListener("keydown", e => { const c = e.target.closest("[data-proj]"); if (c && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openProject(c.dataset.proj); } });

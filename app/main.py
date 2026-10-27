@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import auth, backup, config, db, gitsync, service as s
+from . import auth, backup, config, db, gitsync, invoice as inv, service as s
 from .mcp_server import mcp
 
 log = logging.getLogger("devtrack")
@@ -261,6 +261,23 @@ def review_md(day: str | None = None, project: str | None = None):
     r = s.weekly_review(day, project)
     return Response(r["markdown"], media_type="text/markdown; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="devtrack-{r["week"]}.md"'})
+
+
+@app.get("/api/invoice")
+def invoice(project: str, start: str | None = None, end: str | None = None, rate: str | None = None, number: str | None = None):
+    return s.invoice(project, start, end, rate, number)
+
+
+@app.get("/api/invoice.csv")
+def invoice_csv(project: str, start: str | None = None, end: str | None = None, rate: str | None = None, number: str | None = None):
+    i = s.invoice(project, start, end, rate, number)
+    return Response(inv.to_csv(i), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="invoice-{i["number"]}.csv"'})
+
+
+@app.get("/api/invoice.html", include_in_schema=False)
+def invoice_html(project: str, start: str | None = None, end: str | None = None, rate: str | None = None, number: str | None = None):
+    return Response(inv.to_html(s.invoice(project, start, end, rate, number or None)), media_type="text/html; charset=utf-8")
 
 
 @app.get("/api/costs")

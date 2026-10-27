@@ -165,3 +165,18 @@ def test_weekly_review_lists_this_weeks_work(server, page):
     page.click("[data-rv='0']")
     page.get_by_text("Finished for the review").first.wait_for()
     assert page.errors == []
+
+
+def test_invoice_link_opens_a_printable_page(server, page):
+    it = _api(server, "/api/items", {"project": "demo", "title": "Billable work", "cost": 120, "actual_hours": 3})
+    _api(server, f"/api/items/{it['id']}", {"status": "done"}, method="PATCH")
+    page.reload()
+    page.click('#nav button[data-view="insights"]')
+    link = page.locator("a", has_text="Invoice").first
+    with page.context.expect_page() as new:
+        link.click()
+    inv = new.value
+    inv.get_by_text("Billable work").wait_for()
+    assert inv.get_by_text("Print or save as PDF").is_visible()
+    inv.close()
+    assert page.errors == []

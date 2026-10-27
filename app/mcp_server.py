@@ -258,6 +258,15 @@ def weekly_review(day: str | None = None, project: str | None = None) -> dict:
 
 
 @mcp.tool()
+def invoice(project: str, start: str | None = None, end: str | None = None, rate: float | None = None) -> dict:
+    """Billable lines for a client project: items finished between start and end (default this
+    month so far) with actual hours and amount (their cost, or hours x rate; rate defaults to
+    DEVTRACK_HOURLY_RATE), and totals per currency. The printable invoice is at
+    /api/invoice.html?project=<slug>&start=...&end=... for the developer to open."""
+    return s.invoice(project, start, end, rate)
+
+
+@mcp.tool()
 def cost_summary(project: str | None = None) -> dict:
     """Estimate hours, actual hours and costs (open vs done) per project."""
     return s.cost_summary(project)

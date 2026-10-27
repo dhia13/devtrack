@@ -992,3 +992,38 @@ def _review_markdown(r: dict) -> str:
         if rows:
             out += ["", f"## {title}", *rows]
     return "\n".join(out) + "\n"
+
+
+def invoice(project, start=None, end=None, rate=None, number: str | None = None) -> dict:
+    """Billable lines for one project: items finished between start and end (default: this month
+    so far), each with its actual hours and its cost, or hours x rate when it has no cost."""
+    end_d = parse_date(end) if end else date.today()
+    start_d = parse_date(start) if start else end_d.replace(day=1)
+    if start_d > end_d:
+        raise Invalid("start must be on or before end")
+    try:
+        rate = float(rate) if rate not in (None, "") else config.HOURLY_RATE
+    except (TypeError, ValueError):
+        raise Invalid("rate must be a number") from None
+    if rate < 0:
+        raise Invalid("rate can't be negative")
+    a, b = start_d.isoformat(), end_d.isoformat()
+    with tx() as conn:
+        p = _get_project(conn, project)
+        rows = conn.execute(ITEM_SELECT + " WHERE i.project_id = ? AND i.status = 'done' AND substr(i.completed_at, 1, 10) BETWEEN ? AND ?"
+                            " ORDER BY i.completed_at, i.id", (p["id"], a, b)).fetchall()
+    lines, totals = [], {}
+    for it in map(_item_dict, rows):
+        hrs = it["actual_hours"] or 0
+        cur = it["currency"] or DEFAULT_CURRENCY
+        amount = it["cost"] if it["cost"] else round(hrs * rate, 2) if rate and hrs else None
+        if amount:
+            totals[cur] = round(totals.get(cur, 0) + amount, 2)
+        lines.append({"id": it["id"], "title": it["title"], "kind": it["kind"], "ticket_ref": it["ticket_ref"],
+                      "done_on": it["completed_at"][:10], "hours": hrs or None, "amount": amount, "currency": cur,
+                      "basis": "cost" if it["cost"] else "rate" if amount else None})
+    return {"project": p["slug"], "client": p["name"], "start": a, "end": b, "rate": rate or None,
+            "currency": DEFAULT_CURRENCY, "number": number or f"{p['slug'].upper()}-{end_d:%Y%m}",
+            "issued_on": date.today().isoformat(), "from": config.INVOICE_FROM, "lines": lines,
+            "total_hours": round(sum(line["hours"] or 0 for line in lines), 2), "totals": totals,
+            "unpriced": sum(line["amount"] is None for line in lines)}
