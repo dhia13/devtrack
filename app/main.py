@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import auth, backup, config, db, gitsync, service as s
+from . import auth, backup, config, db, gitsync, invoice as inv, service as s
 from .mcp_server import mcp
 
 log = logging.getLogger("devtrack")
@@ -91,6 +91,12 @@ def index():
     return FileResponse(STATIC / "index.html", headers=NO_CACHE)
 
 
+@app.get("/sw.js", include_in_schema=False)
+def service_worker():
+    # Served from the root so it can control the whole app.
+    return FileResponse(STATIC / "sw.js", media_type="text/javascript", headers=NO_CACHE)
+
+
 app.mount("/static", _Static(directory=STATIC), name="static")
 
 
@@ -105,6 +111,7 @@ def meta():
         "statuses": s.STATUSES, "kinds": s.KINDS, "assignees": s.ASSIGNEES,
         "priorities": s.PRIORITIES, "note_kinds": s.NOTE_KINDS,
         "project_statuses": s.PROJECT_STATUSES, "currency": s.DEFAULT_CURRENCY,
+        "ics_alert": config.ICS_ALERT,
     }
 
 
@@ -207,6 +214,32 @@ def redate(item_id: int, day: str | None = None, start: str = "09:00", end: str 
     return s.redate_plan(item_id, day, start, end, remote)
 
 
+# ---- templates
+
+@app.get("/api/templates")
+def templates():
+    return s.list_templates()
+
+
+@app.post("/api/templates")
+def save_template(body: dict = Body(...)):
+    return s.save_template(body.pop("name", ""), **body)
+
+
+@app.delete("/api/templates/{ref}")
+def remove_template(ref: str):
+    s.delete_template(ref)
+    return {"ok": True}
+
+
+@app.post("/api/templates/{ref}/use")
+def use_template(ref: str, body: dict = Body(...)):
+    project, title = body.pop("project", None), body.pop("title", None)
+    if not project:
+        raise s.Invalid("project is required")
+    return s.create_from_template(ref, project, title, **body)
+
+
 # ---- notes, planning
 
 @app.get("/api/notes")
@@ -223,6 +256,40 @@ def create_note(body: dict = Body(...)):
 @app.get("/api/agenda")
 def agenda(days: int = 14, project: str | None = None):
     return s.agenda(days, project)
+
+
+@app.get("/api/reminders")
+def reminders(project: str | None = None):
+    return s.reminders(project)
+
+
+@app.get("/api/review")
+def review(day: str | None = None, project: str | None = None):
+    return s.weekly_review(day, project)
+
+
+@app.get("/api/review.md")
+def review_md(day: str | None = None, project: str | None = None):
+    r = s.weekly_review(day, project)
+    return Response(r["markdown"], media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="devtrack-{r["week"]}.md"'})
+
+
+@app.get("/api/invoice")
+def invoice(project: str, start: str | None = None, end: str | None = None, rate: str | None = None, number: str | None = None):
+    return s.invoice(project, start, end, rate, number)
+
+
+@app.get("/api/invoice.csv")
+def invoice_csv(project: str, start: str | None = None, end: str | None = None, rate: str | None = None, number: str | None = None):
+    i = s.invoice(project, start, end, rate, number)
+    return Response(inv.to_csv(i), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="invoice-{i["number"]}.csv"'})
+
+
+@app.get("/api/invoice.html", include_in_schema=False)
+def invoice_html(project: str, start: str | None = None, end: str | None = None, rate: str | None = None, number: str | None = None):
+    return Response(inv.to_html(s.invoice(project, start, end, rate, number or None)), media_type="text/html; charset=utf-8")
 
 
 @app.get("/api/costs")

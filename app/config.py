@@ -5,6 +5,7 @@ Values are read once, at import. docker-compose.yml passes the user-facing ones 
 """
 
 import os
+import re
 from pathlib import Path
 
 
@@ -39,6 +40,13 @@ def _list(name: str, default: str) -> list[str]:
 DB_PATH = _str("DEVTRACK_DB", "/data/devtrack.db")
 SEED_PROJECTS = _list("DEVTRACK_SEED_PROJECTS", "")
 DEFAULT_CURRENCY = _str("DEVTRACK_CURRENCY", "USD") or "USD"
+# Invoices: who they are from (write \n between lines) and the rate for items with hours but no cost.
+INVOICE_FROM = _str("DEVTRACK_INVOICE_FROM").replace("\\n", "\n")
+HOURLY_RATE = _num("DEVTRACK_HOURLY_RATE", 0, minimum=0)
+# Calendar feed: the time on a milestone's day its event alerts (HH:MM); empty for no alerts.
+ICS_ALERT = _str("DEVTRACK_ICS_ALERT", "09:00")
+if ICS_ALERT and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", ICS_ALERT):
+    raise ConfigError(f"DEVTRACK_ICS_ALERT={ICS_ALERT!r} must be HH:MM, like 09:00, or empty")
 
 # ---- HTTP: host names the app answers to (blocks DNS rebinding, see README "Security")
 ALLOWED_HOSTS = _list("DEVTRACK_ALLOWED_HOSTS", "localhost,127.0.0.1")

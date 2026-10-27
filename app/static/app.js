@@ -2,11 +2,11 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const VIEWS = ["home", "tasks", "agenda", "calendar", "projects", "insights", "activity", "settings"];
-const state = { view: "home", meta: null, projects: [], selected: new Set(), expanded: {}, meProject: "",
+const VIEWS = ["home", "tasks", "agenda", "calendar", "projects", "insights", "review", "activity", "settings"];
+const state = { view: "home", meta: null, projects: [], templates: [], selected: new Set(), expanded: {}, meProject: "",
   tl: { project: "", status: "", type: "" },
   cal: { mode: "month", anchor: null, types: { submit: true, merge: true, deploy: true, due: true }, done: true },
-  tasks: { mode: "board", mine: false, priority: "" }, ins: { range: 30 },
+  tasks: { mode: "board", mine: false, priority: "" }, ins: { range: 30 }, review: { day: "" },
   filters: { status: "", assignee: "", search: "", closed: false } };
 try { const s = JSON.parse(localStorage.getItem("devtrack-ui") || "{}"); state.view = VIEWS.includes(s.view) ? s.view : s.view === "items" ? "tasks" : "home"; Object.assign(state.filters, s.filters || {}); state.project = s.project; state.meProject = s.meProject || ""; Object.assign(state.tl, s.tl || {}); Object.assign(state.tasks, s.tasks || {}); Object.assign(state.ins, s.ins || {}); if (s.cal) { state.cal.mode = s.cal.mode || "month"; Object.assign(state.cal.types, s.cal.types || {}); state.cal.done = s.cal.done ?? true; } } catch {}
 const persist = () => { try { localStorage.setItem("devtrack-ui", JSON.stringify({ view: state.view, filters: state.filters, project: projectFilter.value, meProject: state.meProject, tl: state.tl, tasks: state.tasks, ins: state.ins, cal: { mode: state.cal.mode, types: state.cal.types, done: state.cal.done } })); } catch {} };
@@ -16,7 +16,7 @@ const store = {
 };
 
 // ---------- appearance (per browser)
-const LOOK_DEFAULT = { theme: "auto", wall: "ash", accent: "blue", glass: "tinted", solid: false, focusMin: 25, breakMin: 5, goalMin: 120, sound: true };
+const LOOK_DEFAULT = { theme: "auto", wall: "ash", accent: "blue", glass: "tinted", solid: false, focusMin: 25, breakMin: 5, goalMin: 120, sound: true, remind: false, remindHour: 9 };
 const look = { ...LOOK_DEFAULT, ...store.get("devtrack-look", {}) };
 const WALLS = ["ash", "sand", "sage", "aurora", "smoke", "tide", "bloom", "ember", "grove", "dusk"];
 const ACCENTS = { blue: "#2f6fde", purple: "#7c5ce0", pink: "#d63f7f", orange: "#d4621f", green: "#1f9254", graphite: "#5d6673" };
@@ -49,8 +49,10 @@ function holdDate(k) {
 const holdTag = it => it.on_hold
   ? `<span class="tag hold" title="On hold${it.snoozed_until ? " until " + fmtDate(it.snoozed_until) : ""}">${it.waiting_for ? "waiting: " + esc(it.waiting_for) : "snoozed"}${it.snoozed_until ? " · " + fmtDate(it.snoozed_until, { day: "numeric", month: "short" }) : ""}</span>`
   : it.back_today ? `<span class="tag back" title="Its check-back day has come">back${it.waiting_for ? " from " + esc(it.waiting_for) : ""}</span>` : "";
+const depTag = it => it.blocked_by_open?.length ? `<span class="tag dep" title="Waiting on ${it.blocked_by_open.map(i => "#" + i).join(", ")}">blocked by ${it.blocked_by_open.map(i => "#" + i).join(" ")}</span>` : "";
 const repeatTag = it => it.repeat_every ? `<span class="tag" title="Repeats every ${esc(it.repeat_every)}: finishing it schedules the next one">↻ ${esc(it.repeat_every)}</span>` : "";
-const nextNote = saved => saved.next_occurrence ? ` · next #${saved.next_occurrence.id}${saved.next_occurrence.due_on ? " due " + fmtDate(saved.next_occurrence.due_on) : ""}` : "";
+const nextNote = saved => (saved.next_occurrence ? ` · next #${saved.next_occurrence.id}${saved.next_occurrence.due_on ? " due " + fmtDate(saved.next_occurrence.due_on) : ""}` : "")
+  + (saved.unblocked?.length ? ` · unblocked ${saved.unblocked.map(i => "#" + i).join(" ")}` : "");
 const holdBtn = it => `<button type="button" class="ibtn" data-hold="${it.id}" title="${it.on_hold ? "Change hold" : "Put on hold"}" aria-label="Put ${esc(it.title)} on hold">${CLOCK}</button>`;
 state.waitingVals = new Set();
 const noteWaiting = list => list.forEach(i => i.waiting_for && state.waitingVals.add(i.waiting_for));
@@ -522,7 +524,7 @@ const views = {
     const myTasks = mine.slice(0, showN).map(it => `<div class="task" data-item="${it.id}">
         <input type="checkbox" class="round" data-done="${it.id}" title="Mark done" aria-label="Mark ${esc(it.title)} done">
         <span class="t"><span class="title">${esc(it.title)}</span>
-          <span class="sub">${pchip(it.project)}${it.due_on ? `<span class="${it.due_on < today ? "late" : ""}">${it.due_on === today ? "Today" : rel(it.due_on)}</span>` : ""}${holdTag(it)}${repeatTag(it)}</span></span>
+          <span class="sub">${pchip(it.project)}${it.due_on ? `<span class="${it.due_on < today ? "late" : ""}">${it.due_on === today ? "Today" : rel(it.due_on)}</span>` : ""}${holdTag(it)}${repeatTag(it)}${depTag(it)}</span></span>
         ${flag(it.priority)}${holdBtn(it)}</div>`).join("") || `<div class="empty">Nothing waiting on you.</div>`;
     noteWaiting(a.on_hold);
     // focus card
@@ -596,7 +598,7 @@ const views = {
     const card = it => {
       const { total, done } = checklist(it.description), nm = it.next_milestone, closed = it.status === "done";
       const d = closed ? (it.completed_at ? `Done ${fmtDate(it.completed_at, { day: "numeric", month: "short" })}` : "Done") : nm ? `${nm.type} ${nm.date === today ? "today" : fmtDate(nm.date, { day: "numeric", month: "short" })}` : "";
-      const gb = gitBadges(it), hold = holdTag(it) + repeatTag(it);
+      const gb = gitBadges(it), hold = holdTag(it) + repeatTag(it) + depTag(it);
       return `<div class="kcard${closed ? " closed" : ""}${it.on_hold ? " held" : ""}" draggable="true" data-item="${it.id}" data-status="${it.status}">
         <div class="top">${pchip(it.project, true)}${flag(it.priority)}</div>
         <div class="title">${esc(it.title)}</div>
@@ -632,13 +634,14 @@ const views = {
     const pf = projectFilter.value, trRows = tr.projects.filter(r => !pf || r.project === pf);
     const acc = r => r.paired ? Math.round(r.paired_actual / r.paired_estimate * 100) : null;
     const timeTable = trRows.length ? `<div class="tablewrap"><table>
-        <thead><tr><th>Project</th><th class="num">Focus</th><th class="num">Sessions</th><th class="num">Finished</th><th class="num">Estimate</th><th class="num">Actual</th><th class="num" title="For finished items that have both an estimate and actual hours: actual as a share of the estimate">Actual vs estimate</th><th class="num">Cost</th></tr></thead>
+        <thead><tr><th>Project</th><th class="num">Focus</th><th class="num">Sessions</th><th class="num">Finished</th><th class="num">Estimate</th><th class="num">Actual</th><th class="num" title="For finished items that have both an estimate and actual hours: actual as a share of the estimate">Actual vs estimate</th><th class="num">Cost</th><th><span class="sr-only">Invoice</span></th></tr></thead>
         <tbody>${trRows.map(r => `<tr ${r.project !== "(no item)" ? `data-filter-project="${esc(r.project)}"` : ""}>
           <td>${r.project === "(no item)" ? `<span class="muted">Focus with no item</span>` : pchip(r.project)}</td>
           <td class="num">${r.focus_minutes ? (r.focus_minutes / 60).toFixed(1) + "h" : "–"}</td><td class="num">${r.sessions || "–"}</td>
           <td class="num">${r.finished || "–"}</td><td class="num">${hours(r.estimate_hours) || "–"}</td><td class="num">${hours(r.actual_hours) || "–"}</td>
           <td class="num" title="${r.paired ? `${r.paired} item${r.paired === 1 ? "" : "s"} with both numbers` : "No finished item has both an estimate and actual hours"}">${acc(r) === null ? "–" : `<span class="${acc(r) > 120 ? "late" : ""}">${acc(r)}%</span> <span class="muted" style="font-size:12px">of ${r.paired}</span>`}</td>
-          <td class="num">${Object.entries(r.cost).map(([k, v]) => money(v, k)).join(" · ") || "–"}</td></tr>`).join("")}</tbody></table></div>`
+          <td class="num">${Object.entries(r.cost).map(([k, v]) => money(v, k)).join(" · ") || "–"}</td>
+          <td class="num">${r.project !== "(no item)" && r.finished ? `<a class="btn sm ghost" href="/api/invoice.html?${new URLSearchParams({ project: r.project, start, end: today })}" target="_blank" rel="noopener" title="Printable invoice for the items finished in this range">Invoice</a>` : ""}</td></tr>`).join("")}</tbody></table></div>`
       : `<div class="empty">No focus sessions or finished items in this range.</div>`;
     const inP = (d, a, b) => d && d >= a && d <= b, pend = toISO(addDays(parseISO(start), -1));
     const cur = items.filter(i => inP(doneDay(i), start, today)), prev = items.filter(i => inP(doneDay(i), pstart, pend));
@@ -703,7 +706,13 @@ const views = {
     const ico = (c, p) => `<span class="ico" style="--c:${c}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${p}</svg></span>`;
     const IC = { look: '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><path d="M12 2a10 10 0 0 0 0 20c1 0 1.6-.8 1.6-1.7 0-.5-.2-.8-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.6 1.7-1.6H16a6 6 0 0 0 6-6c0-4.9-4.5-8.3-10-8.3z"/>',
       focus: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/>', data: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>', keys: '<rect x="2" y="6" width="20" height="13" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 15h10"/>',
-      git: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 5-8 3-12 7"/>' };
+      git: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 5-8 3-12 7"/>',
+      tpl: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+      bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/>' };
+    const perm = "Notification" in window ? Notification.permission : "unsupported";
+    const hh = h => `${String(h).padStart(2, "0")}:00`;
+    await loadTemplates();
+    const tpls = state.templates;
     const kb = n => n > 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.round(n / 1e3) + " KB";
     const last = bk.backups.find(b => b.reason !== "pre-restore");
     const okLine = (ok, yes, no) => `<span class="${ok ? "okdot" : "nodot"}"></span>${ok ? yes : no}`;
@@ -715,9 +724,11 @@ const views = {
         <nav class="panel set-nav" aria-label="Settings sections">
           <button data-sect="appearance">${ico("#a259ff", IC.look)}Appearance</button>
           <button data-sect="focus">${ico("#f08c2e", IC.focus)}Focus</button>
+          <button data-sect="reminders">${ico("#e8a60c", IC.bell)}Reminders</button>
           <button data-sect="backups">${ico("#e5484d", IC.data)}Backups</button>
           <button data-sect="git">${ico("#6b5ae0", IC.git)}Git sync</button>
           <button data-sect="data">${ico("#22b37a", IC.data)}Data</button>
+          <button data-sect="templates">${ico("#0fa5a5", IC.tpl)}Templates</button>
           <button data-sect="keys">${ico("#4c7dff", IC.keys)}Shortcuts</button>
         </nav>
         <div class="stack">
@@ -742,6 +753,14 @@ const views = {
             <div class="set-row"><span class="t"><b>${focusS ? `In focus · ${mmss(focusLeft())} left` : "Start a session now"}</b><small>${focusS ? esc(focusS.title) : `${look.focusMin} minutes, no item`}</small></span>
               ${focusS ? `<button class="btn" data-focus="end">End session</button>` : `<button class="btn primary" data-fstart>Start</button>`}</div>
           </section>
+          <section class="panel" id="sect-reminders"><div class="panel-h"><div><h3>Reminders</h3><span class="sub">What's due, overdue or back from hold today</span></div></div>
+            <div class="set-row"><span class="t"><b>Notifications</b><small>${perm === "denied" ? `<span class="late">Blocked in this browser's site settings,</span> so reminders show inside DevTrack instead.` : perm === "unsupported" ? "This browser has no notifications, so reminders show inside DevTrack." : "A morning summary, then a note whenever something new comes due. They fire while DevTrack is open in a tab or installed as an app."}</small></span>
+              <input type="checkbox" class="switch" data-look="remind" ${look.remind ? "checked" : ""} aria-label="Notifications"></div>
+            <div class="set-row"><span class="t"><b>Morning summary</b><small>From this hour, or when you first open DevTrack after it</small></span>
+              <span class="stepper"><button type="button" data-step="remindHour" data-d="-1" data-min="0" aria-label="Earlier">−</button><b>${hh(look.remindHour)}</b><button type="button" data-step="remindHour" data-d="1" data-max="23" aria-label="Later">+</button></span></div>
+            <div class="set-row"><span class="t"><b>Send one now</b><small>See today's summary as it will arrive</small></span><button class="btn" data-remind-test>Test</button></div>
+            <div class="set-row"><span class="t"><b>Calendar alerts</b><small>${state.meta.ics_alert ? `Events in the calendar feed alert at ${esc(state.meta.ics_alert)} on the day, even with DevTrack closed. Set DEVTRACK_ICS_ALERT to change the time.` : "Off. Set DEVTRACK_ICS_ALERT=09:00 in .env to make calendar feed events alert on the day."}</small></span></div>
+          </section>
           <section class="panel" id="sect-backups"><div class="panel-h"><div><h3>Backups</h3><span class="sub">A snapshot of the whole database every ${bk.every_hours || 24}h, the newest ${bk.keep || 14} kept</span></div><span class="spacer"></span><button class="btn sm primary" data-backup-now ${bk.writable === false ? "disabled" : ""}>Back up now</button></div>
             <div class="set-row"><span class="t"><b>${okLine(last && (Date.now() - new Date(last.taken_at)) < 36 * 36e5, `Last backup ${last ? ago(last.taken_at) : ""}`, last ? `Last backup ${ago(last.taken_at)}` : "No backup yet")}</b>
               <small>Saved on this computer in <span class="mono">${esc(!bk.host_dir || bk.host_dir === "./backups" ? "backups\\ next to docker-compose.yml" : bk.host_dir)}</span>, outside Docker, so they survive losing the container's volume.${bk.writable === false ? ` <span class="late">The folder isn't writable.</span>` : ""}</small></span></div>
@@ -764,8 +783,19 @@ const views = {
             <div class="set-row"><span class="t"><b>Focus history</b><small>${days ? `${days} day${days === 1 ? "" : "s"} of focus sessions, saved in DevTrack` : "No focus sessions logged yet"}</small></span>
               <button class="btn danger" data-clear-focus ${days ? "" : "disabled"}>Clear</button></div>
           </section>
+          <section class="panel" id="sect-templates"><div class="panel-h"><div><h3>Templates</h3><span class="sub">Start an item with its checklist filled in. Pick one from the command bar (Ctrl K), or use Save as template in an item.</span></div></div>
+            ${tpls.map(x => `<div class="bk"><span><b>${esc(x.name)}</b> <span class="tag">${esc(x.kind)}</span>${x.assignee === "me" ? ` <span class="tag">for you</span>` : ""}
+                <small>${esc(x.title)}${tplSteps(x.description) ? ` · ${tplSteps(x.description)} steps` : ""}${x.estimate_hours ? ` · ${x.estimate_hours}h` : ""}</small></span>
+              <span class="acts"><button class="btn sm" data-tpl-use="${x.id}">Use</button><button class="btn sm ghost danger" data-tpl-del="${x.id}" data-name="${esc(x.name)}">Delete</button></span></div>`).join("") || `<div class="empty">No templates yet.</div>`}
+            <form id="tplForm" class="tpl-form" autocomplete="off">
+              <input name="name" placeholder="Template name, e.g. Hotfix" aria-label="Template name" required maxlength="80">
+              <select name="kind" aria-label="Kind">${state.meta.kinds.map(k => `<option ${k === "task" ? "selected" : ""}>${k}</option>`).join("")}</select>
+              <textarea name="steps" rows="3" placeholder="One step per line" aria-label="Steps"></textarea>
+              <button type="submit" class="btn primary sm">Add template</button>
+            </form>
+          </section>
           <section class="panel" id="sect-keys"><div class="panel-h"><h3>Shortcuts</h3></div>
-            <div class="keys">${[["Command bar", "Ctrl K"], ["New item", "N"], ["Filter tasks", "/"], ["Switch view", "1 – 8"], ["Start or pause focus", "F"], ["Calendar: move", "← →"], ["Calendar: today", "T"], ["Save item", "Ctrl Enter"], ["Close dialog", "Esc"]]
+            <div class="keys">${[["Command bar", "Ctrl K"], ["New item", "N"], ["Filter tasks", "/"], ["Switch view", "1 – 9"], ["Start or pause focus", "F"], ["Calendar: move", "← →"], ["Calendar: today", "T"], ["Save item", "Ctrl Enter"], ["Close dialog", "Esc"]]
               .map(([a, k]) => `<div><span>${a}</span><span>${k.split(" ").map(x => `<kbd>${x}</kbd>`).join(" ")}</span></div>`).join("")}</div></section>
         </div>
       </div>`;
@@ -784,7 +814,7 @@ const views = {
     const itemRow = (it, check) => `<div class="row" data-item="${it.id}">
         ${check ? `<input type="checkbox" class="round" data-done="${it.id}" title="Mark done" aria-label="Mark ${esc(it.title)} done">` : ""}
         <span class="t"><span class="title">${esc(it.title)}</span>
-          <span class="sub"><span class="proj">${esc(it.project)}</span>${it.branch ? `<span class="mono">${esc(it.branch)}</span>` : ""}${it.submit_on ? `<span>submit ${fmtDate(it.submit_on)}</span>` : ""}${it.due_on ? `<span class="${it.due_on < a.today ? "late" : ""}">due ${fmtDate(it.due_on)}</span>` : ""}${holdTag(it)}${repeatTag(it)}${gitBadges(it)}</span></span>
+          <span class="sub"><span class="proj">${esc(it.project)}</span>${it.branch ? `<span class="mono">${esc(it.branch)}</span>` : ""}${it.submit_on ? `<span>submit ${fmtDate(it.submit_on)}</span>` : ""}${it.due_on ? `<span class="${it.due_on < a.today ? "late" : ""}">due ${fmtDate(it.due_on)}</span>` : ""}${holdTag(it)}${repeatTag(it)}${depTag(it)}${gitBadges(it)}</span></span>
         <span class="right">${it.assignee === "me" ? holdBtn(it) : ""}${statusChip(it.status)}</span></div>`;
     noteWaiting(a.on_hold);
     const byWait = {};
@@ -984,6 +1014,42 @@ const views = {
           <td class="num">${fmtCost(c.cost_open)}</td><td class="num">${fmtCost(c.cost_done)}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">No items yet.</td></tr>`}</tbody></table></div>`;
   },
 
+  async review() {
+    const p = projectFilter.value, rv = state.review;
+    const r = await api(`/api/review?${new URLSearchParams({ ...(rv.day && { day: rv.day }), ...(p && { project: p }) })}`);
+    state.reviewMd = r.markdown;
+    const thisWeek = !rv.day || r.start <= todayISO() && todayISO() <= r.end;
+    const row = (it, extra = "") => `<div class="row" data-item="${it.id}"><span class="t"><span class="title">${esc(it.title)}</span>
+        <span class="sub"><span class="proj">${esc(it.project)}</span>${extra}${it.assignee === "me" ? `<span>for you</span>` : ""}</span></span><span class="right">${statusChip(it.status)}</span></div>`;
+    const ev = e => row(e.item, `<span class="ev ${e.type}">${e.type}</span><span>${fmtDate(e.date, { weekday: "short", day: "numeric", month: "short" })}</span>`);
+    const panel = (title, sub, body, empty) => `<div class="panel"><div class="panel-h"><div><h3>${title}</h3>${sub ? `<span class="sub">${sub}</span>` : ""}</div></div>${body || `<div class="empty">${empty}</div>`}</div>`;
+    const late = new Set(r.finished_late.map(i => i.id));
+    const fmtRange = `${fmtDate(r.start, { day: "numeric", month: "short" })} – ${fmtDate(r.end, { day: "numeric", month: "short" })}`;
+    const acts = `<div class="pills" role="group" aria-label="Week"><button type="button" data-rv="-1" aria-label="Previous week">‹</button><button type="button" data-rv="0" class="${thisWeek ? "on" : ""}">This week</button><button type="button" data-rv="1" aria-label="Next week" ${thisWeek ? "disabled" : ""}>›</button></div>
+      <button class="btn" data-rv-copy>Copy summary</button><a class="btn" href="/api/review.md?${new URLSearchParams({ day: r.start, ...(p && { project: p }) })}" download>Download .md</a>`;
+    return pageH("Weekly review", `Week ${+r.week.slice(6)}, ${r.week.slice(0, 4)} · ${fmtRange}${p ? ` · ${esc(p)}` : ""}`, acts) + `
+      <div class="tiles">
+        ${tile("Finished", r.finished.length, r.finished_late.length ? `<small> · ${r.finished_late.length} late</small>` : "")}
+        ${tile("Started", r.created.length)}
+        ${tile("Slipped", r.slipped.length, "", r.slipped.length ? "alert" : "")}
+        ${tile("Focus", (r.focus_minutes / 60).toFixed(1) + "<small>h</small>")}
+        ${tile("Actual vs estimate", r.estimate_hours ? `${hours(r.actual_hours) || "0h"}<small> / ${hours(r.estimate_hours)}</small>` : "–")}
+      </div>
+      <div class="cols">
+        <div class="stack">
+          ${panel("Finished", "Marked done this week", r.finished.map(it => row(it, `${late.has(it.id) ? `<span class="late">late, due ${fmtDate(it.due_on)}</span>` : ""}${it.actual_hours ? `<span>${hours(it.actual_hours)}</span>` : ""}`)).join(""), "Nothing finished this week.")}
+          ${panel("Slipped", "Milestones this week that passed without being reached", r.slipped.map(ev).join(""), "Nothing slipped.")}
+          ${panel("Started", "Items created this week", r.created.map(it => row(it)).join(""), "No new items.")}
+        </div>
+        <div class="stack">
+          ${panel("Next week", fmtDate(toISO(addDays(parseISO(r.end), 1)), { day: "numeric", month: "short" }) + " – " + fmtDate(toISO(addDays(parseISO(r.end), 7)), { day: "numeric", month: "short" }), r.next_week.map(ev).join(""), "Nothing scheduled.")}
+          ${panel("Decisions and blockers", "Notes of those kinds this week", r.decisions.map(n => `<div class="row"><span class="t"><span class="title">${esc(n.body.split("\n")[0])}</span><span class="sub"><span class="proj">${esc(n.project)}</span><span class="tag">${n.kind}</span>${n.item_id ? `<span>#${n.item_id}</span>` : ""}</span></span></div>`).join(""), "None noted.")}
+          ${panel("By project", "", r.by_project.map(x => `<div class="row" data-filter-project="${esc(x.project)}"><span class="t">${pchip(x.project)}</span><span class="right muted">${x.finished} finished · ${x.created} started</span></div>`).join(""), "No activity.")}
+          ${panel("Still open", "", `<div class="row"><span class="t">Blocked</span><span class="right"><b>${r.still_open.blocked}</b></span></div><div class="row" data-goto="agenda"><span class="t">Waiting on you</span><span class="right"><b>${r.still_open.waiting_on_me}</b></span></div>`, "")}
+        </div>
+      </div>`;
+  },
+
   async activity() {
     const p = projectFilter.value;
     const notes = await api(`/api/notes?limit=150${p ? "&project=" + encodeURIComponent(p) : ""}`);
@@ -1036,6 +1102,16 @@ async function render() {
   paintFocus(); persist();
 }
 
+async function loadTemplates() {
+  state.templates = await api("/api/templates").catch(() => []);
+}
+const TPL_KEYS = ["title", "description", "kind", "priority", "assignee", "estimate_hours"];
+const tplSteps = d => (String(d || "").match(/^\s*[-*+]\s+\[[ xX]\]/gm) || []).length;
+function useTemplate(tpl) {
+  const preset = {};
+  TPL_KEYS.forEach(k => { if (tpl[k] != null) preset[k] = tpl[k]; });
+  return openItem(null, preset);
+}
 async function loadProjects() {
   state.projects = await api("/api/projects?include_archived=true");
   const cur = projectFilter.value || state.project || "";
@@ -1087,7 +1163,7 @@ async function quickCheck(cb) {
 // ---------- item dialog
 const itemDlg = $("#itemDlg"), itemForm = $("#itemForm");
 let editing = null, dirty = false;
-const ITEM_KEYS = ["title","project","kind","status","assignee","priority","ticket_ref","description","branch","base_branch","built_on","pr_url","commit_date","submit_on","merge_on","deploy_on","due_on","estimate_hours","actual_hours","cost","currency","waiting_for","snoozed_until","repeat_every"];
+const ITEM_KEYS = ["title","project","kind","status","assignee","priority","ticket_ref","description","branch","base_branch","built_on","pr_url","commit_date","submit_on","merge_on","deploy_on","due_on","estimate_hours","actual_hours","cost","currency","waiting_for","snoozed_until","repeat_every","blocked_by"];
 const fillSelect = (sel, values) => sel.innerHTML = values.map(v => `<option value="${esc(v)}">${esc(label(v))}</option>`).join("");
 const fit = ta => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
 function paintStatus() { const s = itemForm.status; s.className = "status-select s-" + s.value; }
@@ -1110,7 +1186,7 @@ async function openItem(id, preset = {}) {
   fillSelect(itemForm.priority, state.meta.priorities);
   fillSelect(itemForm.kind, state.meta.kinds);
   itemForm.reset();
-  ITEM_KEYS.forEach(k => { if (k !== "description") itemForm[k].value = k === "commit_date" ? (it[k] || "").slice(0, 16) : (it[k] ?? ""); });
+  ITEM_KEYS.forEach(k => { if (k !== "description") itemForm[k].value = k === "commit_date" ? (it[k] || "").slice(0, 16) : k === "blocked_by" ? (it[k] || []).map(i => "#" + i).join(", ") : (it[k] ?? ""); });
   setEditor(itemForm.description, it.description);
   setEditor(itemForm.noteBody, "");
   $("#itemCrumbs").innerHTML = editing
@@ -1150,6 +1226,17 @@ itemForm.addEventListener("submit", async e => {
     dirty = false; itemDlg.close(); toast((editing ? `Saved #${saved.id}` : `Created #${saved.id}`) + nextNote(saved)); await loadProjects(); render();
   } catch (err) { toast(err.message); }
 });
+$("#saveTplBtn").onclick = async () => {
+  const name = itemForm.title.value.trim(); if (!name) return itemForm.title.focus();
+  const body = { name };
+  TPL_KEYS.forEach(k => { const v = String(itemForm[k].value ?? "").trim(); body[k] = v || (k === "description" || k === "estimate_hours" ? null : undefined); });
+  try {
+    const exists = state.templates?.some(x => x.name.toLowerCase() === name.toLowerCase());
+    if (exists && !(await ask(`Replace the ${name} template?`, "A template with this name exists. Its title, checklist, kind, priority, assignee and estimate are replaced with this item's.", { ok: "Replace" }))) return;
+    const x = await api("/api/templates", { method: "POST", body });
+    await loadTemplates(); toast(`Saved the ${x.name} template`);
+  } catch (err) { toast(err.message); }
+};
 $("#deleteItem").onclick = async () => {
   if (!editing || !(await ask(`Delete #${editing.id}?`, `"${editing.title}" and its link to notes will be removed. This can't be undone.`, { ok: "Delete", danger: true }))) return;
   await api(`/api/items/${editing.id}`, { method: "DELETE" }); dirty = false; itemDlg.close(); toast("Deleted"); render();
@@ -1223,9 +1310,10 @@ const ICON = {
   focus: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/>', git: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 5-8 3-12 7"/>',
   disk: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/>', theme: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/>',
   proj: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  bill: '<path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h3"/>',
 };
 const ic = k => `<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg></span>`;
-const VIEW_NAMES = { home: "Home", tasks: "Tasks", agenda: "Agenda", calendar: "Calendar", projects: "Projects", insights: "Insights", activity: "Activity", settings: "Settings" };
+const VIEW_NAMES = { home: "Home", tasks: "Tasks", agenda: "Agenda", calendar: "Calendar", projects: "Projects", insights: "Insights", review: "Weekly review", activity: "Activity", settings: "Settings" };
 const DATE_WORD = /^(today|tomorrow|\+\d+d|\d{4}-\d{2}-\d{2}|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i;
 // "Fix invoice PDF frub high due friday #bug" -> title + {project, priority, due_on, kind}
 function parseQuick(text) {
@@ -1261,6 +1349,7 @@ function ckCommands() {
     ...VIEWS.map((v, i) => ({ k: "go", t: `Go to ${VIEW_NAMES[v]}`, kbd: String(i + 1), run: () => { state.view = v; render(); } })),
     { k: "proj", t: "Show all projects", run: () => { projectFilter.value = ""; render(); } },
     ...state.projects.map(p => ({ k: "proj", t: `Show ${p.name}`, s: `${p.open_items || 0} open · ${p.my_items || 0} on you`, run: () => { projectFilter.value = p.slug; render(); } })),
+    ...state.projects.map(p => ({ k: "bill", t: `Invoice ${p.name}`, s: "This month so far, to print or save as PDF", run: () => open(`/api/invoice.html?project=${encodeURIComponent(p.slug)}`, "_blank", "noopener") })),
   ];
 }
 const fuzzy = (q, t) => { q = q.toLowerCase(); t = t.toLowerCase(); let i = 0; for (const ch of t) if (ch === q[i]) i++; return i === q.length; };
@@ -1279,11 +1368,13 @@ async function ckRender() {
     } catch { found = []; }
     if (seq !== ckSeq) return; // a newer keystroke is already rendering
   }
+  const tpls = (state.templates || []).filter(x => !q || fuzzy(q, x.name) || fuzzy(q, "template " + x.name));
   const quick = q.length >= 3 && !idm ? parseQuick(q) : null;
   const qProj = quick && (quick.fields.project || projectFilter.value || state.projects[0]?.slug);
   ckItems = [
     ...strong.slice(0, q ? 6 : 30).map(c => ({ sec: "Commands", ...c, sub: c.s ? esc(c.s) : "" })),
-    ...found.slice(0, 8).map(it => ({ sec: "Items", k: "item", t: `#${it.id} ${it.title}`, sub: `${pchip(it.project)}${statusChip(it.status)}${holdTag(it)}${repeatTag(it)}`, run: () => openItem(it.id) })),
+    ...tpls.slice(0, q ? 4 : 8).map(x => ({ sec: "Templates", k: "plus", t: `New ${x.name}`, sub: `${esc(x.kind)}${tplSteps(x.description) ? ` · ${tplSteps(x.description)} steps` : ""}${x.assignee === "me" ? " · for you" : ""}`, run: () => useTemplate(x) })),
+    ...found.slice(0, 8).map(it => ({ sec: "Items", k: "item", t: `#${it.id} ${it.title}`, sub: `${pchip(it.project)}${statusChip(it.status)}${holdTag(it)}${repeatTag(it)}${depTag(it)}`, run: () => openItem(it.id) })),
     ...(quick && quick.title ? [{ sec: "Create", k: "plus", t: `New item: ${quick.title}`, kbd: "Shift ↵",
         sub: pchip(qProj) + quick.chips.map(c => `<span class="tag">${esc(c)}</span>`).join(""), run: () => quickCreate(quick, qProj) }] : []),
     ...cmds.slice(0, 5).map(c => ({ sec: "More commands", ...c, sub: c.s ? esc(c.s) : "" })),
@@ -1332,6 +1423,46 @@ document.addEventListener("keydown", e => {
   }
 });
 
+
+// ---------- reminders
+// Browser notifications only fire while DevTrack is open (a tab, or the installed app); the
+// calendar feed's alerts cover the rest.
+const canNotify = () => "Notification" in window && Notification.permission === "granted";
+async function notify(title, body, tag) {
+  if (!canNotify()) return toast(`${title}: ${body}`, { label: "Agenda", run: () => { state.view = "agenda"; render(); } });
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) return await reg.showNotification(title, { body, tag, icon: "/static/icon.svg" });
+    const n = new Notification(title, { body, tag, icon: "/static/icon.svg" });
+    n.onclick = () => { window.focus(); state.view = "agenda"; render(); n.close(); };
+  } catch { toast(`${title}: ${body}`); }
+}
+async function checkReminders(force = false) {
+  if (!look.remind && !force) return;
+  const day = todayISO(), seen = store.get("devtrack-reminded", {});
+  if (seen.day !== day) Object.assign(seen, { day, summary: false, keys: [] });
+  if (!force && new Date().getHours() < look.remindHour) return;
+  let r; try { r = await api("/api/reminders"); } catch { return; }
+  const evs = [...r.overdue, ...r.due_today].map(e => ({ key: `${e.item.id}-${e.type}`, text: `${e.type} · ${e.item.title}` }))
+    .concat(r.back_today.map(i => ({ key: `${i.id}-back`, text: `back · ${i.title}` })));
+  if (!seen.summary || force) {
+    seen.summary = true; seen.keys = evs.map(e => e.key);
+    const more = r.waiting_on_me ? ` ${r.waiting_on_me} waiting on you.` : "";
+    if (evs.length || r.waiting_on_me || force) notify("DevTrack today", `${r.summary}${more}${evs.length ? "\n" + evs.slice(0, 4).map(e => e.text).join("\n") : ""}`, "devtrack-summary");
+  } else {
+    const fresh = evs.filter(e => !seen.keys.includes(e.key));
+    seen.keys.push(...fresh.map(e => e.key));
+    if (fresh.length) notify(fresh.length === 1 ? "Now due" : `${fresh.length} now due`, fresh.map(e => e.text).join("\n"), "devtrack-due");
+  }
+  store.set("devtrack-reminded", seen);
+}
+setInterval(checkReminders, 60_000);
+async function setReminders(on) {
+  if (on && "Notification" in window && Notification.permission === "default") await Notification.requestPermission();
+  look.remind = on; applyLook();
+  if (on) checkReminders();
+  if (state.view === "settings") render();
+}
 
 // ---------- glass dropdowns
 // The open list of a native <select> is drawn by the OS and can't be styled, so on mouse/trackpad
@@ -1596,6 +1727,20 @@ $("#view").addEventListener("click", async e => {
     catch (err) { toast(err.message); }
     return render();
   }
+  if (t.closest("[data-remind-test]")) return checkReminders(true);
+  const rvb = t.closest("[data-rv]"); if (rvb) {
+    const n = +rvb.dataset.rv, base = parseISO(state.review.day || todayISO());
+    state.review.day = n === 0 ? "" : toISO(addDays(base, 7 * n));
+    if (state.review.day && state.review.day >= todayISO()) state.review.day = "";
+    return render();
+  }
+  if (t.closest("[data-rv-copy]")) return navigator.clipboard.writeText(state.reviewMd || "").then(() => toast("Summary copied as Markdown"), () => toast("Couldn't copy here; use Download .md"));
+  const tu = t.closest("[data-tpl-use]"); if (tu) return useTemplate(state.templates.find(x => x.id === +tu.dataset.tplUse));
+  const td = t.closest("[data-tpl-del]"); if (td) {
+    if (!(await ask(`Delete the ${td.dataset.name} template?`, "Items already made from it stay as they are.", { ok: "Delete", danger: true }))) return;
+    try { await api(`/api/templates/${td.dataset.tplDel}`, { method: "DELETE" }); toast("Template deleted"); } catch (err) { toast(err.message); }
+    return render();
+  }
   if (t.closest("[data-clear-focus]")) {
     if (!(await ask("Clear focus history?", "Deletes every logged focus session. Items, notes and their actual hours are not touched.", { ok: "Clear", danger: true }))) return;
     await api("/api/focus", { method: "DELETE" }); Object.keys(focusLog).forEach(k => delete focusLog[k]); toast("Focus history cleared"); return render();
@@ -1612,7 +1757,7 @@ $("#view").addEventListener("click", async e => {
   const bulk = t.closest("[data-bulk]"); if (bulk) return runBulk(bulk.dataset.bulk);
   const item = t.closest("[data-item]"); if (item && !t.closest("a[href^=http]")) { e.preventDefault(); return openItem(item.dataset.item); }
   const proj = t.closest("[data-proj]"); if (proj) return openProject(proj.dataset.proj);
-  const fp = t.closest("[data-filter-project]"); if (fp) { projectFilter.value = fp.dataset.filterProject; state.view = "tasks"; return render(); }
+  const fp = !t.closest("a[href]") && t.closest("[data-filter-project]"); if (fp) { projectFilter.value = fp.dataset.filterProject; state.view = "tasks"; return render(); }
   if (t.id === "addProj") openProject(null);
 });
 $("#view").addEventListener("keydown", e => { const c = e.target.closest("[data-proj]"); if (c && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openProject(c.dataset.proj); } });
@@ -1625,6 +1770,7 @@ $("#view").addEventListener("change", e => {
   if (t.dataset.tl) { state.tl[t.dataset.tl] = t.value; return render(); }
   if (t.hasAttribute("data-tprio")) { state.tasks.priority = t.value; return render(); }
   if (["theme", "wall", "accent", "glass"].includes(t.name) && t.type === "radio") { look[t.name] = t.value; applyLook(); return render(); }
+  if (t.dataset.look === "remind") return setReminders(t.checked);
   if (t.dataset.look) { look[t.dataset.look] = t.checked; applyLook(); return; }
   if (t.name === "calMode") { state.cal.mode = t.value; return render(); }
   if (t.dataset.calType) { state.cal.types[t.dataset.calType] = t.checked; return render(); }
@@ -1706,6 +1852,15 @@ $("#view").addEventListener("input", e => {
   }, 250);
 });
 $("#view").addEventListener("submit", async e => {
+  if (e.target.id === "tplForm") {
+    e.preventDefault(); const f = e.target;
+    const steps = f.steps.value.split("\n").map(s => s.trim().replace(/^[-*+]\s+(\[[ xX]\]\s+)?/, "")).filter(Boolean);
+    try {
+      const x = await api("/api/templates", { method: "POST", body: { name: f.name.value, kind: f.kind.value, description: steps.map(s => `- [ ] ${s}`).join("\n") || null } });
+      toast(`Saved the ${x.name} template`); render();
+    } catch (err) { toast(err.message); }
+    return;
+  }
   if (e.target.id !== "noteForm") return;
   e.preventDefault(); const f = e.target;
   if (!f.body.value.trim()) return f.body.focus();
@@ -1718,7 +1873,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "n") { e.preventDefault(); openItem(null); }
   else if (e.key === "/") { e.preventDefault(); goSearch(); }
   else if (e.key === "f") { if (focusS) focusAction("pause"); else startFocus(); }
-  else if (/^[1-8]$/.test(e.key)) { state.view = VIEWS[+e.key - 1]; render(); }
+  else if (/^[1-9]$/.test(e.key)) { state.view = VIEWS[+e.key - 1]; render(); }
   else if (state.view === "calendar" && (e.key === "ArrowLeft" || e.key === "ArrowRight")) $(`[data-cal-nav="${e.key === "ArrowLeft" ? -1 : 1}"]`)?.click();
   else if (state.view === "calendar" && e.key === "t") $('[data-cal-nav="0"]')?.click();
 });
@@ -1734,6 +1889,16 @@ setInterval(() => {
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => look.theme === "auto" && state.view === "settings" && render());
   state.meta = await api("/api/meta");
   await loadFocus();
-  await loadProjects();
+  await Promise.all([loadProjects(), loadTemplates()]);
+  // a home-screen shortcut or a notification can open a view: /?view=agenda
+  const qv = new URLSearchParams(location.search).get("view");
+  if (VIEWS.includes(qv)) { state.view = qv; history.replaceState(null, "", "/"); }
   render();
+  checkReminders();
 })();
+if ("serviceWorker" in navigator && isSecureContext) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+  navigator.serviceWorker.addEventListener("message", e => { if (VIEWS.includes(e.data?.view)) { state.view = e.data.view; render(); } });
+}
+addEventListener("offline", () => toast("You're offline. Changes won't save until you're back."));
+addEventListener("online", () => { toast("Back online"); render(); });

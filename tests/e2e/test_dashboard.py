@@ -20,7 +20,7 @@ sync_api = pytest.importorskip("playwright.sync_api")
 pytestmark = pytest.mark.e2e
 
 ROOT = Path(__file__).resolve().parents[2]
-VIEWS = ("home", "tasks", "agenda", "calendar", "projects", "insights", "activity", "settings")
+VIEWS = ("home", "tasks", "agenda", "calendar", "projects", "insights", "review", "activity", "settings")
 
 
 def _free_port() -> int:
@@ -52,9 +52,9 @@ def server(tmp_path_factory):
     proc.wait(10)
 
 
-def _api(base, path, body=None):
+def _api(base, path, body=None, method=None):
     req = urllib.request.Request(base + path, data=json.dumps(body).encode() if body else None,
-                                 headers={"Content-Type": "application/json"})
+                                 headers={"Content-Type": "application/json"}, method=method)
     with urllib.request.urlopen(req) as r:
         return json.load(r)
 
@@ -119,4 +119,104 @@ def test_bell_lists_what_waits_on_you(server, page):
     menu.get_by_text("Approve the store listing").click()  # opens the item
     page.locator("#itemDlg[open]").wait_for()
     assert page.input_value("#itemForm [name=title]") == "Approve the store listing"
+    assert page.errors == []
+
+
+def test_blocked_by_field_round_trips(server, page):
+    first = _api(server, "/api/items", {"project": "demo", "title": "Write the API"})
+    second = _api(server, "/api/items", {"project": "demo", "title": "Build the screen", "blocked_by": [first["id"]]})
+    page.reload()
+    page.click('#nav button[data-view="tasks"]')
+    page.get_by_text(f"blocked by #{first['id']}").first.wait_for()
+    page.evaluate(f"openItem({second['id']})")
+    page.locator("#itemDlg[open]").wait_for()
+    assert page.input_value("#itemForm [name=blocked_by]") == f"#{first['id']}"
+    assert page.errors == []
+
+
+def test_template_from_the_command_bar(server, page):
+    page.keyboard.press("Control+K")
+    page.fill("#ckq", "store sub")
+    page.locator(".ck-sec", has_text="Templates").wait_for()
+    page.keyboard.press("Enter")
+    page.locator("#itemDlg[open]").wait_for()
+    assert page.input_value("#itemForm [name=title]") == "Submit to the store"
+    assert page.is_checked("#itemForm [name=assignee][value=me]")
+    assert "Upload the build" in page.input_value("#itemForm [name=description]")
+    page.click("#itemDlg [data-close]")
+    page.click('#nav button[data-view="settings"]')
+    page.fill("#tplForm [name=name]", "Hotfix")
+    page.fill("#tplForm [name=steps]", "Reproduce\n- [ ] Fix")
+    page.click("#tplForm button[type=submit]")
+    page.locator("#sect-templates .bk", has_text="Hotfix").wait_for()
+    hotfix = next(t for t in _api(server, "/api/templates") if t["name"] == "Hotfix")
+    assert hotfix["description"] == "- [ ] Reproduce\n- [ ] Fix"
+    assert page.errors == []
+
+
+def test_weekly_review_lists_this_weeks_work(server, page):
+    it = _api(server, "/api/items", {"project": "demo", "title": "Finished for the review"})
+    _api(server, f"/api/items/{it['id']}", {"status": "done"}, method="PATCH")
+    page.reload()
+    page.click('#nav button[data-view="review"]')
+    page.locator(".panel", has_text="Marked done this week").get_by_text("Finished for the review").wait_for()
+    page.click("[data-rv='-1']")
+    page.get_by_text("Nothing finished this week.").wait_for()
+    page.click("[data-rv='0']")
+    page.get_by_text("Finished for the review").first.wait_for()
+    assert page.errors == []
+
+
+def test_invoice_link_opens_a_printable_page(server, page):
+    it = _api(server, "/api/items", {"project": "demo", "title": "Billable work", "cost": 120, "actual_hours": 3})
+    _api(server, f"/api/items/{it['id']}", {"status": "done"}, method="PATCH")
+    page.reload()
+    page.click('#nav button[data-view="insights"]')
+    link = page.locator("a", has_text="Invoice").first
+    with page.context.expect_page() as new:
+        link.click()
+    inv = new.value
+    inv.get_by_text("Billable work").wait_for()
+    assert inv.get_by_text("Print or save as PDF").is_visible()
+    inv.close()
+    assert page.errors == []
+
+
+def test_morning_summary_notifies(server, page):
+    _api(server, "/api/items", {"project": "demo", "title": "Deploy the hotfix", "deploy_on": "today"})
+    # Record notifications instead of showing them, and start with reminders on from midnight.
+    page.add_init_script("""
+        window.shown = [];
+        window.Notification = class { static permission = "granted"; constructor(t, o) { shown.push([t, o.body]); } close() {} };
+        if (window.ServiceWorkerRegistration)
+            ServiceWorkerRegistration.prototype.showNotification = async (t, o) => { shown.push([t, o.body]); };
+        if (!sessionStorage.getItem("seeded")) {
+            sessionStorage.setItem("seeded", "1");
+            localStorage.setItem("devtrack-look", JSON.stringify({ remind: true, remindHour: 0 }));
+            localStorage.removeItem("devtrack-reminded");
+        }
+    """)
+    page.reload()
+    page.wait_for_function("window.shown.length > 0")
+    title, body = page.evaluate("window.shown[0]")
+    assert title == "DevTrack today" and "due today" in body and "deploy · Deploy the hotfix" in body
+    page.reload()  # once a day: the summary isn't repeated
+    page.wait_for_load_state("networkidle")
+    assert page.evaluate("window.shown") == []
+    page.click('#nav button[data-view="settings"]')
+    page.click("[data-remind-test]")
+    page.wait_for_function("window.shown.length > 0")
+    assert page.errors == []
+
+
+def test_installable_and_opens_a_view_from_the_url(server, page):
+    page.goto(server + "/?view=agenda")
+    page.locator("h1", has_text="Agenda").wait_for()
+    assert page.evaluate("location.search") == ""
+    assert page.evaluate("navigator.serviceWorker.ready.then(r => r.active.scriptURL)").endswith("/sw.js")
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.click('#nav button[data-view="settings"]')
+    page.locator("#sect-reminders").wait_for()
+    assert page.evaluate("document.documentElement.scrollWidth") <= 390
+    assert page.locator('#nav button[data-view="settings"]').is_visible()
     assert page.errors == []

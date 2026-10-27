@@ -66,6 +66,28 @@ CREATE TABLE IF NOT EXISTS notes (
 CREATE INDEX IF NOT EXISTS notes_project ON notes(project_id, created_at);
 CREATE INDEX IF NOT EXISTS notes_item ON notes(item_id);
 
+-- "item_id can't move until blocked_by is finished" (merged or later, or cancelled).
+CREATE TABLE IF NOT EXISTS item_deps (
+    item_id    INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    blocked_by INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    PRIMARY KEY (item_id, blocked_by)
+);
+CREATE INDEX IF NOT EXISTS item_deps_blocker ON item_deps(blocked_by);
+
+-- Reusable starting points for items ("Release", "Store submission"), picked from the command bar.
+CREATE TABLE IF NOT EXISTS templates (
+    id             INTEGER PRIMARY KEY,
+    name           TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    title          TEXT NOT NULL,
+    description    TEXT,
+    kind           TEXT NOT NULL DEFAULT 'task',
+    priority       TEXT NOT NULL DEFAULT 'normal',
+    assignee       TEXT NOT NULL DEFAULT 'agent',
+    estimate_hours REAL,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+
 -- Focus timer sessions (the island). item_id is optional; project_id follows the item.
 CREATE TABLE IF NOT EXISTS focus_sessions (
     id         INTEGER PRIMARY KEY,
@@ -98,6 +120,17 @@ CREATE TABLE IF NOT EXISTS git_status (
 );
 """
 
+# Seeded once, when a database first reaches v3. Edit or delete them in Settings.
+STARTER_TEMPLATES = (
+    ("Release", "Release", "- [ ] Bump the version\n- [ ] Update the changelog\n- [ ] Tag and push\n- [ ] Deploy\n- [ ] Smoke test production",
+     "deploy", "agent"),
+    ("New project setup", "Set up the project", "- [ ] Create the repo\n- [ ] CI with lint and tests\n- [ ] README\n- [ ] Env vars and secrets\n- [ ] First deploy",
+     "chore", "agent"),
+    ("Store submission", "Submit to the store", "- [ ] Screenshots\n- [ ] Listing text\n- [ ] Privacy policy URL\n- [ ] Upload the build\n- [ ] Submit for review",
+     "task", "me"),
+)
+
+
 def _add_columns(conn, table: str, cols: dict) -> None:
     have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
     for col, decl in cols.items():
@@ -117,7 +150,11 @@ def _v2_repeat(conn):
 # Schema changes since the first release, oldest first. PRAGMA user_version records how many a
 # database has had. Append new steps; never edit or reorder old ones. SCHEMA above is always the
 # latest shape, so a new database skips them.
-MIGRATIONS = (_v1_on_hold, _v2_repeat)
+def _v3_templates(conn):
+    pass  # the templates table is in SCHEMA; init() seeds the starters when crossing this version
+
+
+MIGRATIONS = (_v1_on_hold, _v2_repeat, _v3_templates)
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -161,6 +198,12 @@ def init() -> None:
                 step(conn)
         conn.executescript(SCHEMA)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        if version < 3 and not conn.execute("SELECT 1 FROM templates").fetchone():
+            ts = now()
+            conn.executemany(
+                "INSERT INTO templates (name, title, description, kind, assignee, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(*t, ts, ts) for t in STARTER_TEMPLATES],
+            )
         empty = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
         if empty:
             ts = now()

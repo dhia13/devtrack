@@ -187,6 +187,8 @@ def _item_dict(row) -> dict:
     it["git"] = git if git.get("checked_at") else None
     if it["git"]:
         it["git"]["repos"] = [r for r in (it["git"]["repos"] or "").splitlines() if r]
+    it["blocked_by"] = [int(x) for x in (it.pop("dep_all") or "").split(",") if x]
+    it["blocked_by_open"] = [int(x) for x in (it.pop("dep_open") or "").split(",") if x]
     it["needs_redate"] = bool(
         it["branch"] and rank < RANK["submitted"] and it["status"] != "cancelled" and (
             it["status"] == "parked"
@@ -198,8 +200,14 @@ def _item_dict(row) -> dict:
 
 GIT_COLS = ("repos", "head_sha", "last_commit_at", "ahead", "behind", "base_ref", "unpushed", "on_remote",
             "early_commits", "mr_url", "mr_state", "mr_merged_at", "error", "checked_at")
+# A blocker counts as finished once it is merged (the code exists) or closed.
+DEP_DONE = tuple(s for s in STATUSES if RANK[s] >= RANK["merged"])
+_DEP_DONE_SQL = ", ".join(repr(x) for x in DEP_DONE)
 ITEM_SELECT = f"""
-SELECT i.*, p.slug AS project, p.name AS project_name, {", ".join(f"g.{c} AS git_{c}" for c in GIT_COLS)}
+SELECT i.*, p.slug AS project, p.name AS project_name, {", ".join(f"g.{c} AS git_{c}" for c in GIT_COLS)},
+  (SELECT group_concat(d.blocked_by) FROM (SELECT blocked_by FROM item_deps WHERE item_id = i.id ORDER BY blocked_by) d) AS dep_all,
+  (SELECT group_concat(d.blocked_by) FROM (SELECT x.blocked_by FROM item_deps x JOIN items b ON b.id = x.blocked_by
+     WHERE x.item_id = i.id AND b.status NOT IN ({_DEP_DONE_SQL}) ORDER BY x.blocked_by) d) AS dep_open
 FROM items i JOIN projects p ON p.id = i.project_id
 LEFT JOIN git_status g ON g.item_id = i.id
 """
@@ -357,10 +365,70 @@ def get_item(item_id: int, with_notes: bool = True) -> dict:
         return it
 
 
+def parse_ids(value) -> list[int]:
+    """[12, 15], "12, 15" or "#12 #15" -> [12, 15]."""
+    if value is None or value == "":
+        return []
+    parts = value if isinstance(value, (list, tuple)) else re.split(r"[\s,;]+", str(value).strip())
+    out = []
+    for p in parts:
+        s = str(p).strip().lstrip("#")
+        if not s:
+            continue
+        if not s.isdigit():
+            raise Invalid(f"blocked_by takes item numbers like #12, not {p!r}")
+        out.append(int(s))
+    return sorted(set(out))
+
+
+def _set_blockers(conn, it: dict, value, author=None) -> None:
+    """Replace the item's blockers. An open item with unfinished blockers becomes 'blocked'."""
+    ids = parse_ids(value)
+    for b in ids:
+        if b == it["id"]:
+            raise Invalid("an item can't block itself")
+        _fetch_item(conn, b)  # NotFound for a missing number
+    # Refuse cycles: nothing this item (transitively) blocks may block it.
+    seen, todo = set(), [it["id"]]
+    while todo:
+        cur = todo.pop()
+        for (dep,) in conn.execute("SELECT item_id FROM item_deps WHERE blocked_by = ?", (cur,)):
+            if dep in ids:
+                raise Invalid(f"#{dep} already waits on #{it['id']}, so it can't block it")
+            if dep not in seen:
+                seen.add(dep)
+                todo.append(dep)
+    before = {r[0] for r in conn.execute("SELECT blocked_by FROM item_deps WHERE item_id = ?", (it["id"],))}
+    conn.execute("DELETE FROM item_deps WHERE item_id = ?", (it["id"],))
+    conn.executemany("INSERT INTO item_deps (item_id, blocked_by) VALUES (?, ?)", [(it["id"], b) for b in ids])
+    fresh = _fetch_item(conn, it["id"])
+    added = set(ids) - before  # re-saving the same list (the dialog does) mustn't undo a manual status
+    if (added & set(fresh["blocked_by_open"]) and RANK[fresh["status"]] < RANK["submitted"]
+            and fresh["status"] != "blocked"):
+        conn.execute("UPDATE items SET status = 'blocked', updated_at = ? WHERE id = ?", (now(), it["id"]))
+        refs = ", ".join(f"#{b}" for b in fresh["blocked_by_open"])
+        _insert_note(conn, it["project_id"], f"Blocked by {refs}.", "blocker", it["id"], author or "devtrack")
+
+
+def _unblock_dependents(conn, blocker: dict) -> list[int]:
+    """When a blocker finishes, move items it was the last open blocker of from blocked to todo."""
+    freed = []
+    for (dep_id,) in conn.execute("SELECT item_id FROM item_deps WHERE blocked_by = ?", (blocker["id"],)).fetchall():
+        dep = _fetch_item(conn, dep_id)
+        if dep["status"] == "blocked" and not dep["blocked_by_open"]:
+            conn.execute("UPDATE items SET status = 'todo', updated_at = ? WHERE id = ?", (now(), dep_id))
+            _insert_note(conn, dep["project_id"], f"Unblocked: #{blocker['id']} is {blocker['status']}.", "info", dep_id, "devtrack")
+            freed.append(dep_id)
+    return freed
+
+
 def create_item(project, title: str, **fields) -> dict:
+    blocked_by = fields.pop("blocked_by", None)
     with tx() as conn:
         p = _ensure_project(conn, project)
         item_id = _insert_item(conn, p["id"], {"title": title, **fields})
+        if blocked_by not in (None, "", []):
+            _set_blockers(conn, _fetch_item(conn, item_id), blocked_by)
         return _fetch_item(conn, item_id)
 
 
@@ -393,6 +461,7 @@ def _next_occurrence(conn, it: dict) -> dict:
 
 
 def update_item(item_id: int, project=None, note: str | None = None, author: str | None = None, **fields) -> dict:
+    blocked_by = fields.pop("blocked_by", None)
     with tx() as conn:
         current = _fetch_item(conn, item_id)
         changes = _clean_item(fields)
@@ -414,7 +483,12 @@ def update_item(item_id: int, project=None, note: str | None = None, author: str
             )
         if note:
             _insert_note(conn, current["project_id"], note, "progress", current["id"], author)
+        if blocked_by is not None:
+            _set_blockers(conn, current, blocked_by, author)
         updated = _fetch_item(conn, current["id"])
+        if status in DEP_DONE and current["status"] not in DEP_DONE:
+            if freed := _unblock_dependents(conn, updated):
+                updated["unblocked"] = freed
         # Reopening and finishing again doesn't make a second copy.
         if (status == "done" and current["status"] != "done" and updated["repeat_every"]
                 and not conn.execute("SELECT 1 FROM items WHERE repeat_of = ?", (current["id"],)).fetchone()):
@@ -425,7 +499,70 @@ def update_item(item_id: int, project=None, note: str | None = None, author: str
 def delete_item(item_id: int) -> None:
     with tx() as conn:
         _fetch_item(conn, item_id)
+        waiting = [r[0] for r in conn.execute("SELECT item_id FROM item_deps WHERE blocked_by = ?", (int(item_id),))]
         conn.execute("DELETE FROM items WHERE id = ?", (int(item_id),))
+        for dep_id in waiting:
+            dep = _fetch_item(conn, dep_id)
+            if dep["status"] == "blocked" and not dep["blocked_by_open"]:
+                conn.execute("UPDATE items SET status = 'todo', updated_at = ? WHERE id = ?", (now(), dep_id))
+                _insert_note(conn, dep["project_id"], f"Unblocked: #{item_id} was deleted.", "info", dep_id, "devtrack")
+
+
+# ---------------------------------------------------------------- templates
+
+TEMPLATE_FIELDS = ("title", "description", "kind", "priority", "assignee", "estimate_hours")
+
+
+def list_templates() -> list[dict]:
+    with tx() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM templates ORDER BY name COLLATE NOCASE")]
+
+
+def _get_template(conn, ref) -> dict:
+    ref = str(ref).strip()
+    row = conn.execute("SELECT * FROM templates WHERE id = ? OR name = ? COLLATE NOCASE",
+                       (int(ref) if ref.isdigit() else -1, ref)).fetchone()
+    if not row:
+        raise NotFound(f"template {ref!r} not found")
+    return dict(row)
+
+
+def save_template(name: str, **fields) -> dict:
+    """Create the template called `name`, or update it if it exists."""
+    name = (name or "").strip()
+    if not name:
+        raise Invalid("template name is required")
+    unknown = set(fields) - set(TEMPLATE_FIELDS)
+    if unknown:
+        raise Invalid(f"unknown template field(s): {', '.join(sorted(unknown))}")
+    clean = _clean_item(fields)
+    ts = now()
+    with tx() as conn:
+        row = conn.execute("SELECT id FROM templates WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
+        if row:
+            if clean:
+                conn.execute(f"UPDATE templates SET {', '.join(f'{k} = ?' for k in clean)}, updated_at = ? WHERE id = ?",
+                             (*clean.values(), ts, row[0]))
+            return _get_template(conn, row[0])
+        clean.setdefault("title", name)
+        cols = ["name", *clean, "created_at", "updated_at"]
+        cur = conn.execute(f"INSERT INTO templates ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                           (name, *clean.values(), ts, ts))
+        return _get_template(conn, cur.lastrowid)
+
+
+def delete_template(ref) -> None:
+    with tx() as conn:
+        conn.execute("DELETE FROM templates WHERE id = ?", (_get_template(conn, ref)["id"],))
+
+
+def create_from_template(template, project, title: str | None = None, **fields) -> dict:
+    """A new item with the template's title, checklist, kind, priority, assignee and estimate.
+    Anything in `fields` (dates, branch, ...) is set on top."""
+    with tx() as conn:
+        t = _get_template(conn, template)
+    base = {k: t[k] for k in TEMPLATE_FIELDS if t[k] is not None and k != "title"}
+    return create_item(project, (title or "").strip() or t["title"], **{**base, **fields})
 
 
 # ---------------------------------------------------------------- notes
@@ -508,7 +645,7 @@ def handoff(project, summary: str, author=None, done=None, next_steps=None,
 def _compact(it: dict) -> dict:
     keys = ("id", "project", "title", "status", "assignee", "priority", "kind", "branch",
             "submit_on", "merge_on", "deploy_on", "due_on", "needs_redate", "pr_url",
-            "waiting_for", "snoozed_until", "on_hold", "back_today", "repeat_every")
+            "waiting_for", "snoozed_until", "on_hold", "back_today", "repeat_every", "blocked_by_open")
     out = {k: it[k] for k in keys}
     g = it.get("git")
     if g:
@@ -546,6 +683,20 @@ def agenda(days: int = 7, project=None) -> dict:
         "parked": [_compact(i) for i in items if i["status"] == "parked"],
         "blocked": [_compact(i) for i in items if i["status"] == "blocked"],
     }
+
+
+def reminders(project=None) -> dict:
+    """What to remind the developer of today: milestones due today, overdue ones, and items
+    whose snooze ends today. `summary` is one line for a notification."""
+    a = agenda(days=0, project=project)
+    due = [e for e in a["upcoming"] if e["date"] == a["today"]]
+    back = [_compact(i) for i in list_items(project=project, limit=100_000) if i["snoozed_until"] == a["today"]]
+    parts = [f"{len(due)} due today" if due else "", f"{len(a['overdue'])} overdue" if a["overdue"] else "",
+             f"{len(back)} back from hold" if back else ""]
+    parts = [x for x in parts if x]
+    return {"today": a["today"], "due_today": due, "overdue": a["overdue"], "back_today": back,
+            "waiting_on_me": len(a["waiting_on_me"]),
+            "summary": ", ".join(parts).capitalize() + "." if parts else "Nothing due today."}
 
 
 def cost_summary(project=None) -> dict:
@@ -642,6 +793,8 @@ def export_all() -> dict:
             "items": [dict(r) for r in conn.execute("SELECT * FROM items ORDER BY id")],
             "notes": [dict(r) for r in conn.execute("SELECT * FROM notes ORDER BY id")],
             "focus_sessions": [dict(r) for r in conn.execute("SELECT * FROM focus_sessions ORDER BY id")],
+            "item_deps": [dict(r) for r in conn.execute("SELECT * FROM item_deps ORDER BY item_id, blocked_by")],
+            "templates": [dict(r) for r in conn.execute("SELECT * FROM templates ORDER BY id")],
         }
 
 
@@ -690,8 +843,12 @@ def calendar_ics(project=None, include_closed: bool = False) -> str:
                 "DESCRIPTION:" + _ics_text("\n".join(desc)),
                 f"CATEGORIES:{kind},{_ics_text(it['project'])}",
                 "TRANSP:TRANSPARENT",
-                "END:VEVENT",
             ]
+            if config.ICS_ALERT and not done and it["status"] != "cancelled":
+                hh, mm = config.ICS_ALERT.split(":")
+                lines += ["BEGIN:VALARM", "ACTION:DISPLAY", f"TRIGGER;RELATED=START:PT{int(hh)}H{int(mm)}M",
+                          "DESCRIPTION:" + _ics_text(f"{kind.capitalize()} today: {it['title']}"), "END:VALARM"]
+            lines.append("END:VEVENT")
     lines.append("END:VCALENDAR")
     return "\r\n".join(_ics_fold(line) for line in lines) + "\r\n"
 
@@ -781,3 +938,110 @@ def time_report(start=None, end=None) -> dict:
     return {"start": a, "end": b, "projects": out,
             "focus_minutes": sum(r["focus_minutes"] for r in out),
             "actual_hours": round(sum(r["actual_hours"] for r in out), 2)}
+
+
+def weekly_review(day=None, project=None) -> dict:
+    """Monday to Sunday of the week holding `day` (default: this week): what was finished, what
+    slipped, what started, focus and hours, decisions, and what is due the week after."""
+    d = parse_date(day) if day else date.today()
+    start = d - timedelta(days=d.weekday())
+    end = start + timedelta(days=6)
+    a, b, today = start.isoformat(), end.isoformat(), date.today().isoformat()
+    items = list_items(project=project, include_closed=True, limit=100_000)
+    finished = [i for i in items if i["status"] == "done" and a <= (i["completed_at"] or "")[:10] <= b]
+    created = [i for i in items if a <= i["created_at"][:10] <= b]
+    na, nb = (end + timedelta(days=1)).isoformat(), (end + timedelta(days=7)).isoformat()
+    slipped, coming = [], []
+    for it in items:
+        if it["status"] == "cancelled":
+            continue
+        for kind, field, reached in MILESTONES:
+            when = it[field]
+            if not when or RANK[it["status"]] >= reached:
+                continue
+            if a <= when <= b and when < today:
+                slipped.append({"date": when, "type": kind, "item": _compact(it)})
+            elif na <= when <= nb:
+                coming.append({"date": when, "type": kind, "item": _compact(it)})
+    slipped.sort(key=lambda e: e["date"])
+    coming.sort(key=lambda e: (e["date"], e["type"]))
+    late = [i for i in finished if i["due_on"] and i["completed_at"][:10] > i["due_on"]]
+    with tx() as conn:
+        pid = _get_project(conn, project)["id"] if project else None
+        pf = " AND project_id = ?" if pid else ""
+        args = (a, b, *((pid,) if pid else ()))
+        focus = conn.execute(f"SELECT COALESCE(SUM(minutes), 0) FROM focus_sessions WHERE day BETWEEN ? AND ?{pf}", args).fetchone()[0]
+        notes = [dict(r) for r in conn.execute(
+            f"""SELECT n.id, n.kind, n.body, n.item_id, n.created_at, p.slug AS project FROM notes n JOIN projects p ON p.id = n.project_id
+                WHERE n.kind IN ('decision', 'blocker') AND substr(n.created_at, 1, 10) BETWEEN ? AND ?{pf.replace('project_id', 'n.project_id')}
+                ORDER BY n.created_at""", args)]
+    by_project: dict[str, dict] = {}
+    for key, group in (("finished", finished), ("created", created)):
+        for it in group:
+            by_project.setdefault(it["project"], {"project": it["project"], "finished": 0, "created": 0})[key] += 1
+    est = sum(i["estimate_hours"] or 0 for i in finished)
+    act = sum(i["actual_hours"] or 0 for i in finished)
+    review = {
+        "week": f"{start.isocalendar()[0]}-W{start.isocalendar()[1]:02d}", "start": a, "end": b,
+        "finished": [_compact(i) for i in finished], "created": [_compact(i) for i in created],
+        "slipped": slipped, "finished_late": [_compact(i) for i in late],
+        "decisions": notes, "focus_minutes": focus,
+        "estimate_hours": round(est, 2), "actual_hours": round(act, 2),
+        "by_project": sorted(by_project.values(), key=lambda r: (-r["finished"], r["project"])),
+        "next_week": coming,
+        "still_open": {"blocked": sum(i["status"] == "blocked" for i in items),
+                       "waiting_on_me": sum(i["assignee"] == "me" and i["status"] not in CLOSED and not i["on_hold"] for i in items)},
+    }
+    review["markdown"] = _review_markdown(review)
+    return review
+
+
+def _review_markdown(r: dict) -> str:
+    line = lambda it: f"- #{it['id']} {it['title']} ({it['project']})"
+    out = [f"# Week {r['week']} ({r['start']} to {r['end']})", "",
+           f"{len(r['finished'])} finished, {len(r['created'])} started, {len(r['slipped'])} slipped. "
+           f"Focus {r['focus_minutes'] / 60:.1f}h." + (f" Actual {r['actual_hours']:g}h against an estimate of {r['estimate_hours']:g}h."
+                                                       if r["estimate_hours"] else "")]
+    sections = (("Finished", [line(i) for i in r["finished"]]),
+                ("Slipped", [f"- {e['type']} {e['date']}: #{e['item']['id']} {e['item']['title']} ({e['item']['project']})" for e in r["slipped"]]),
+                ("Decisions and blockers", [f"- {n['kind']}: {n['body'].splitlines()[0]} ({n['project']})" for n in r["decisions"]]),
+                ("Next week", [f"- {e['type']} {e['date']}: #{e['item']['id']} {e['item']['title']} ({e['item']['project']})" for e in r["next_week"]]))
+    for title, rows in sections:
+        if rows:
+            out += ["", f"## {title}", *rows]
+    return "\n".join(out) + "\n"
+
+
+def invoice(project, start=None, end=None, rate=None, number: str | None = None) -> dict:
+    """Billable lines for one project: items finished between start and end (default: this month
+    so far), each with its actual hours and its cost, or hours x rate when it has no cost."""
+    end_d = parse_date(end) if end else date.today()
+    start_d = parse_date(start) if start else end_d.replace(day=1)
+    if start_d > end_d:
+        raise Invalid("start must be on or before end")
+    try:
+        rate = float(rate) if rate not in (None, "") else config.HOURLY_RATE
+    except (TypeError, ValueError):
+        raise Invalid("rate must be a number") from None
+    if rate < 0:
+        raise Invalid("rate can't be negative")
+    a, b = start_d.isoformat(), end_d.isoformat()
+    with tx() as conn:
+        p = _get_project(conn, project)
+        rows = conn.execute(ITEM_SELECT + " WHERE i.project_id = ? AND i.status = 'done' AND substr(i.completed_at, 1, 10) BETWEEN ? AND ?"
+                            " ORDER BY i.completed_at, i.id", (p["id"], a, b)).fetchall()
+    lines, totals = [], {}
+    for it in map(_item_dict, rows):
+        hrs = it["actual_hours"] or 0
+        cur = it["currency"] or DEFAULT_CURRENCY
+        amount = it["cost"] if it["cost"] else round(hrs * rate, 2) if rate and hrs else None
+        if amount:
+            totals[cur] = round(totals.get(cur, 0) + amount, 2)
+        lines.append({"id": it["id"], "title": it["title"], "kind": it["kind"], "ticket_ref": it["ticket_ref"],
+                      "done_on": it["completed_at"][:10], "hours": hrs or None, "amount": amount, "currency": cur,
+                      "basis": "cost" if it["cost"] else "rate" if amount else None})
+    return {"project": p["slug"], "client": p["name"], "start": a, "end": b, "rate": rate or None,
+            "currency": DEFAULT_CURRENCY, "number": number or f"{p['slug'].upper()}-{end_d:%Y%m}",
+            "issued_on": date.today().isoformat(), "from": config.INVOICE_FROM, "lines": lines,
+            "total_hours": round(sum(line["hours"] or 0 for line in lines), 2), "totals": totals,
+            "unpriced": sum(line["amount"] is None for line in lines)}

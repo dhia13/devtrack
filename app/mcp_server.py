@@ -110,6 +110,7 @@ def create_item(
     waiting_for: str | None = None,
     snoozed_until: str | None = None,
     repeat_every: str | None = None,
+    blocked_by: list[int] | None = None,
 ) -> dict:
     """Track a unit of work (ticket, feature, bug, follow-up, deploy). Unknown project slugs are
     created. assignee='me' means the developer has to do it.
@@ -119,8 +120,11 @@ def create_item(
     waiting_for = who it waits on (e.g. "shop", "ops", "SATIM"); snoozed_until = check-back date.
     Either one puts the item on hold, out of the developer's to-do list until that date.
     repeat_every = "weekly", "monthly", "90d", "2w", ...: marking it done schedules the next copy
-    with its dates moved on by that much (renewals, recurring deploys, monthly reviews)."""
+    with its dates moved on by that much (renewals, recurring deploys, monthly reviews).
+    blocked_by = item ids this can't start before; it goes to 'blocked' and back to 'todo' by
+    itself once they are all merged, deployed, done or cancelled."""
     return s.create_item(project, title, **_given(waiting_for=waiting_for, snoozed_until=snoozed_until, repeat_every=repeat_every,
+        blocked_by=blocked_by,
         description=description, kind=kind, status=status, assignee=assignee, priority=priority,
         ticket_ref=ticket_ref, branch=branch, base_branch=base_branch, pr_url=pr_url,
         built_on=built_on, submit_on=submit_on, commit_date=commit_date, merge_on=merge_on,
@@ -158,19 +162,45 @@ def update_item(
     waiting_for: str | None = None,
     snoozed_until: str | None = None,
     repeat_every: str | None = None,
+    blocked_by: list[int] | None = None,
 ) -> dict:
     """Update an item. Omitted fields are unchanged; pass "" to clear a text/date field.
     `note` adds a progress note to the item's history in the same call.
     waiting_for / snoozed_until put it on hold (pass "" to both to take it off hold).
-    repeat_every makes it recurring ("" stops it); finishing it returns next_occurrence."""
+    repeat_every makes it recurring ("" stops it); finishing it returns next_occurrence.
+    blocked_by replaces the item's blockers ([] clears them). Finishing an item returns `unblocked`,
+    the ids of items that were only waiting on it."""
     return s.update_item(item_id, project=project, note=note, author=author, **_given(
-        waiting_for=waiting_for, snoozed_until=snoozed_until, repeat_every=repeat_every,
+        waiting_for=waiting_for, snoozed_until=snoozed_until, repeat_every=repeat_every, blocked_by=blocked_by,
         title=title, description=description, kind=kind, status=status, assignee=assignee,
         priority=priority, ticket_ref=ticket_ref, branch=branch, base_branch=base_branch,
         pr_url=pr_url, built_on=built_on, submit_on=submit_on, commit_date=commit_date,
         merge_on=merge_on, deploy_on=deploy_on, due_on=due_on, estimate_hours=estimate_hours,
         actual_hours=actual_hours, cost=cost, currency=currency,
     ))
+
+
+@mcp.tool()
+def list_templates() -> list[dict]:
+    """Reusable item templates (name, title, checklist description, kind, priority, assignee,
+    estimate). Use one with `create_from_template` instead of typing a familiar checklist again."""
+    return s.list_templates()
+
+
+@mcp.tool()
+def create_from_template(
+    template: str,
+    project: str,
+    title: str | None = None,
+    due_on: str | None = None,
+    submit_on: str | None = None,
+    branch: str | None = None,
+    assignee: Assignee | None = None,
+) -> dict:
+    """Create an item from a template (by name or id). It takes the template's title unless
+    `title` is given, and its checklist, kind, priority, assignee and estimate."""
+    return s.create_from_template(template, project, title,
+                                  **_given(due_on=due_on, submit_on=submit_on, branch=branch, assignee=assignee))
 
 
 @mcp.tool()
@@ -217,6 +247,23 @@ def agenda(days: int = 7, project: str | None = None) -> dict:
     items waiting on the developer, items on hold (waiting on others / snoozed), parked
     (built-early) and blocked items. Items carry a `git` summary when the branch was synced."""
     return s.agenda(days, project)
+
+
+@mcp.tool()
+def weekly_review(day: str | None = None, project: str | None = None) -> dict:
+    """The week (Monday to Sunday) holding `day`, default this week: items finished, started and
+    slipped, finished late, decisions and blockers noted, focus and actual vs estimate hours, and
+    what is due the next week. `markdown` is a ready summary to show the developer."""
+    return s.weekly_review(day, project)
+
+
+@mcp.tool()
+def invoice(project: str, start: str | None = None, end: str | None = None, rate: float | None = None) -> dict:
+    """Billable lines for a client project: items finished between start and end (default this
+    month so far) with actual hours and amount (their cost, or hours x rate; rate defaults to
+    DEVTRACK_HOURLY_RATE), and totals per currency. The printable invoice is at
+    /api/invoice.html?project=<slug>&start=...&end=... for the developer to open."""
+    return s.invoice(project, start, end, rate)
 
 
 @mcp.tool()

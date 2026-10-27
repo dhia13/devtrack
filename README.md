@@ -52,6 +52,7 @@ instructions file, with `<slug>` set to that project's slug.
 | `merge_on`, `deploy_on`, `due_on` | planned milestones; they show on the agenda until reached |
 | `estimate_hours`, `actual_hours`, `cost`, `currency` | effort and cost, summed per project |
 | `waiting_for`, `snoozed_until` | on hold: who it waits on, and when to check back (see below) |
+| `blocked_by` | item numbers it can't start before (`#12, #15`): see [Dependencies](#dependencies) |
 | `repeat_every` | `daily`, `weekly`, `monthly`, `yearly`, or `90d`, `2w`, `3m`: see [Recurring items](#recurring-items) |
 
 Dates accept `YYYY-MM-DD`, `today`, `tomorrow`, `+3d`, `friday`, `next friday`.
@@ -69,6 +70,9 @@ Dates accept `YYYY-MM-DD`, `today`, `tomorrow`, `+3d`, `friday`, `next friday`.
 | `redate_plan` | Script that rebases a parked branch and spreads its commit dates over the submit day |
 | `git_sync` | Refresh branch and MR state now instead of at the next 15-minute run |
 | `time_report` | Focus hours per project, and estimate vs actual for items finished in a date range |
+| `invoice` | A project's finished items in a date range with hours, amounts and totals, for billing |
+| `weekly_review` | One week's finished, started and slipped work, decisions, hours, and next week, with a Markdown summary |
+| `list_templates`, `create_from_template` | Reusable checklists: create a "Release" or "Store submission" item in one call |
 
 ## Re-dating a branch built early
 
@@ -99,6 +103,73 @@ The focus timer (the island at the top) saves every finished block to DevTrack, 
 when you start it from one. Ending a block also offers to add its minutes to the item's actual
 hours. **Insights → Time by project** shows focus hours per project for the chosen range, and, for
 items finished in it, estimate vs actual hours and cost, with a CSV download (`/api/time.csv`).
+
+## On your phone
+
+The dashboard fits a phone: the views sit in a bar along the bottom, tiles go two a row, the task
+board shows one lane at a time (swipe for the next), and the item editor fills the screen. It is
+also an installable app: in Chrome or Edge use **Install app** (on Android, **Add to home screen**),
+and in Safari on iOS **Share → Add to Home Screen**. The installed app opens without browser bars,
+starts from the last copy when you're offline (changes need the connection), and has Agenda and
+Tasks shortcuts on its icon.
+
+Installing needs HTTPS, or `localhost` on the PC itself. To reach DevTrack from your phone, first
+set it up as in [Reaching it from another machine](#reaching-it-from-another-machine), then put
+HTTPS in front, for example with Tailscale: `tailscale serve --bg 8787` gives you
+`https://my-pc.tailnet.ts.net`, and that host name goes in `DEVTRACK_ALLOWED_HOSTS`. Over plain
+HTTP the page still works in the phone's browser, but it can't be installed and doesn't send
+notifications.
+
+## Reminders
+
+Turn on **Settings → Reminders → Notifications** and DevTrack sends a morning summary (from the
+hour you pick, or when you first open it after that): how many milestones are due today, overdue
+and back from hold, with the first few titles. During the day it adds a note when something new
+comes due, for example when a snooze ends. They are browser notifications, so they fire while
+DevTrack is open in a tab or installed as an app; when notifications are blocked they show inside
+DevTrack instead. **Test** sends today's summary now.
+
+For reminders with DevTrack closed, subscribe to the calendar feed (Settings → Data): each open
+milestone's event alerts at 09:00 on its day. Change the time with `DEVTRACK_ICS_ALERT`, or set it
+empty for no alerts. `/api/reminders` returns the same summary for scripts.
+
+## Invoices
+
+Each project row in **Insights → Time by project** with finished items has an **Invoice** link,
+and the command bar has **Invoice <project>** for this month so far. It opens a printable page:
+the items finished in the range, with their ticket, done date, actual hours and amount, and
+totals. An item's amount is its `cost`, or its actual hours times the hourly rate when it has no
+cost. Change the dates, rate or invoice number at the top, then **Print or save as PDF**, or take
+the **CSV**. Set `DEVTRACK_HOURLY_RATE` for a default rate and `DEVTRACK_INVOICE_FROM` for your
+name and address (`\n` between lines) in `.env`. The bill-to line is the project's name. Agents
+call `invoice`; the API is `/api/invoice`, `/api/invoice.csv` and `/api/invoice.html`.
+
+## Weekly review
+
+**Weekly review** (key `7`) shows one Monday-to-Sunday week: what was finished (and which of it
+late), what was started, milestones that passed without being reached, decisions and blockers
+noted, focus hours, actual vs estimate hours, and what is due the week after. Step back a week
+with the arrows. **Copy summary** puts a Markdown version on the clipboard for a client update or
+a stand-up, and **Download .md** saves it (`/api/review.md`). Agents call `weekly_review`, which
+returns the same data with the Markdown in `markdown`.
+
+## Dependencies
+
+Set **Blocked by** in the item dialog (or `blocked_by` over the API and MCP) to the items this one
+waits on. An open item with an unfinished blocker moves to `blocked`, with a note. Once every
+blocker is merged, deployed, done or cancelled (or deleted), it moves back to `todo` by itself,
+with a note naming the blocker, and the finishing call returns `unblocked` with its number. An
+item you moved on by hand (say to `in_progress`) is left alone. Cycles are refused.
+
+## Templates
+
+A template is a starting point for an item you make often: its title, checklist, kind, priority,
+assignee and estimate. Type its name in the command bar (**Ctrl K**, say `release`) and pick it
+under **Templates** to open a new item with all of that filled in. **Save as template** in the item
+dialog saves the open item under its title (replacing a template of that name), and
+**Settings → Templates** lists, adds and deletes them. Three starters come with a new database:
+Release, New project setup and Store submission. Agents use `list_templates` and
+`create_from_template`, and the API is `/api/templates`.
 
 ## Recurring items
 
@@ -190,7 +261,7 @@ DEVTRACK_BIND=0.0.0.0                    # or your Tailscale IP
 DEVTRACK_ALLOWED_HOSTS=localhost,127.0.0.1,devtrack.localhost,my-pc.tailnet.ts.net
 ```
 
-With a token, every request except `/api/health` needs it:
+With a token, every request except `/api/health` (and the app manifest and its icons) needs it:
 
 - **Dashboard:** sign in once at `/login`; it keeps an HttpOnly cookie for 90 days. `/logout` signs out.
 - **Agents and scripts:** `Authorization: Bearer <token>` (see [Connect an agent](#connect-an-agent)).

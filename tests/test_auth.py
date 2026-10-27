@@ -61,3 +61,11 @@ def test_short_token_refused(monkeypatch):
         importlib.reload(config)
     monkeypatch.undo()
     importlib.reload(config)
+
+
+def test_app_manifest_and_icons_stay_open(locked):
+    # Browsers fetch these without cookies when installing the app.
+    for path in ("/static/manifest.webmanifest", "/static/icon.svg", "/static/icon-192.png", "/static/apple-touch-icon.png"):
+        assert locked.get(path).status_code == 200, path
+    assert locked.get("/static/app.js").status_code == 401
+    assert locked.get("/sw.js", headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 200
