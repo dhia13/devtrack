@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from .db import DB_PATH
+from .db import DB_PATH, SCHEMA_VERSION
 
 BACKUP_DIR = Path(os.environ.get("DEVTRACK_BACKUP_DIR", "/backups"))
 KEEP = max(1, int(os.environ.get("DEVTRACK_BACKUP_KEEP", "14")))
@@ -22,6 +22,14 @@ def _counts(path: Path) -> dict:
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("projects", "items", "notes")}
+    finally:
+        conn.close()
+
+
+def _schema_version(path: Path) -> int:
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return conn.execute("PRAGMA user_version").fetchone()[0]
     finally:
         conn.close()
 
@@ -106,8 +114,11 @@ def restore(name: str) -> dict:
     src_path = path_of(name)
     try:
         _counts(src_path)
+        version = _schema_version(src_path)
     except sqlite3.Error as e:
         raise BackupError(f"{name} is not a readable DevTrack database: {e}") from None
+    if version > SCHEMA_VERSION:
+        raise BackupError(f"{name} is from a newer DevTrack (schema v{version}, this one is v{SCHEMA_VERSION})")
     safety = create_backup("pre-restore")
     src = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True)
     live = sqlite3.connect(DB_PATH, timeout=30)
