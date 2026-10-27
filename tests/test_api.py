@@ -20,6 +20,19 @@ def test_foreign_host_rejected(client):
     assert client.get("/api/health", headers={"Host": "evil.example"}).status_code == 400
 
 
+def test_cross_site_writes_refused(client):
+    evil = {"Origin": "https://evil.example"}
+    assert client.post("/api/backups", headers=evil).status_code == 403
+    assert client.post("/api/items", json={"project": "demo", "title": "x"},
+                       headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
+    assert client.post("/api/items", json={"project": "demo", "title": "x"}, headers={"Origin": "null"}).status_code == 403
+    # reads, the dashboard itself, and clients that send no Origin (agents, curl) still work
+    assert client.get("/api/health", headers=evil).status_code == 200
+    ok = {"Origin": "http://localhost:8787", "Sec-Fetch-Site": "same-origin"}
+    assert client.post("/api/items", json={"project": "demo", "title": "x"}, headers=ok).status_code == 200
+    assert client.post("/api/items", json={"project": "demo", "title": "y"}).status_code == 200
+
+
 def test_item_crud_and_errors(client):
     it = client.post("/api/items", json={"project": "demo", "title": "Write tests", "due_on": "tomorrow"}).json()
     assert it["project"] == "demo" and it["next_milestone"]["type"] == "due"

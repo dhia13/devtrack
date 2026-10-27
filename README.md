@@ -141,4 +141,6 @@ GitHub Actions runs the tests and a container health check on every push.
 
 There is no login. The port is bound to `127.0.0.1` only, and requests with a `Host` other than
 `localhost` or `127.0.0.1` are rejected (`DEVTRACK_ALLOWED_HOSTS`), which blocks DNS rebinding from
-web pages. Don't publish the port on a network interface without adding authentication.
+web pages. Writes (POST, PATCH, DELETE) sent by another site's page are refused too, using the
+browser's `Origin` and `Sec-Fetch-Site` headers; agents and `curl` don't send them and are unaffected.
+Don't publish the port on a network interface without adding authentication.

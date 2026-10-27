@@ -3,6 +3,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import Body, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -91,6 +92,35 @@ def meta():
         "priorities": s.PRIORITIES, "note_kinds": s.NOTE_KINDS,
         "project_statuses": s.PROJECT_STATUSES, "currency": s.DEFAULT_CURRENCY,
     }
+
+
+class SameOriginWrites:
+    """Refuse writes sent by another site's page (CSRF). The Host check alone doesn't stop a page
+    open in your browser from POSTing to localhost; browsers mark those with Origin / Sec-Fetch-Site.
+    Agents and curl send neither header, so they are unaffected."""
+
+    SAFE = {"GET", "HEAD", "OPTIONS"}
+
+    def __init__(self, app, allowed_hosts):
+        self.app, self.allowed = app, {h.lower() for h in allowed_hosts}
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["method"] not in self.SAFE and not self._same_origin(scope):
+            await JSONResponse({"error": "cross-site request refused"}, status_code=403)(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+    def _same_origin(self, scope) -> bool:
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+        if headers.get("sec-fetch-site", "same-origin") not in ("same-origin", "none"):
+            return False
+        origin = headers.get("origin")
+        if origin is None:
+            return True
+        return "*" in self.allowed or (urlsplit(origin).hostname or "").lower() in self.allowed
+
+
+app.add_middleware(SameOriginWrites, allowed_hosts=ALLOWED_HOSTS)
 
 
 # ---- projects
