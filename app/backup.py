@@ -6,11 +6,12 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from .db import DB_PATH
+from . import config
+from .db import DB_PATH, SCHEMA_VERSION
 
-BACKUP_DIR = Path(os.environ.get("DEVTRACK_BACKUP_DIR", "/backups"))
-KEEP = max(1, int(os.environ.get("DEVTRACK_BACKUP_KEEP", "14")))
-EVERY = timedelta(hours=float(os.environ.get("DEVTRACK_BACKUP_EVERY_HOURS", "24")))
+BACKUP_DIR = config.BACKUP_DIR
+KEEP = config.BACKUP_KEEP
+EVERY = timedelta(hours=config.BACKUP_EVERY_HOURS)
 NAME_RE = re.compile(r"devtrack-(\d{8}-\d{6})(?:-([a-z-]+))?\.db")
 
 
@@ -22,6 +23,14 @@ def _counts(path: Path) -> dict:
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("projects", "items", "notes")}
+    finally:
+        conn.close()
+
+
+def _schema_version(path: Path) -> int:
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return conn.execute("PRAGMA user_version").fetchone()[0]
     finally:
         conn.close()
 
@@ -45,7 +54,7 @@ def _files() -> list[Path]:
 
 def list_backups() -> dict:
     files = _files()
-    return {"dir": str(BACKUP_DIR), "host_dir": os.environ.get("DEVTRACK_BACKUP_HOST_DIR"), "keep": KEEP,
+    return {"dir": str(BACKUP_DIR), "host_dir": config.BACKUP_HOST_DIR, "keep": KEEP,
             "every_hours": EVERY.total_seconds() / 3600, "writable": _writable(),
             "backups": [_info(p) for p in files]}
 
@@ -106,8 +115,11 @@ def restore(name: str) -> dict:
     src_path = path_of(name)
     try:
         _counts(src_path)
+        version = _schema_version(src_path)
     except sqlite3.Error as e:
         raise BackupError(f"{name} is not a readable DevTrack database: {e}") from None
+    if version > SCHEMA_VERSION:
+        raise BackupError(f"{name} is from a newer DevTrack (schema v{version}, this one is v{SCHEMA_VERSION})")
     safety = create_backup("pre-restore")
     src = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True)
     live = sqlite3.connect(DB_PATH, timeout=30)

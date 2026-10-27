@@ -1,12 +1,13 @@
 """Business logic shared by the REST API and the MCP server."""
 
-import os
 import re
+import shlex
 from datetime import date, datetime, time, timedelta
 
+from . import config
 from .db import now, tx
 
-DEFAULT_CURRENCY = os.environ.get("DEVTRACK_CURRENCY", "USD")
+DEFAULT_CURRENCY = config.DEFAULT_CURRENCY
 
 STATUSES = (
     "backlog", "todo", "in_progress", "blocked", "parked",
@@ -50,6 +51,25 @@ class NotFound(LookupError):
 
 class Invalid(ValueError):
     pass
+
+
+# A branch or remote name git would accept (see git check-ref-format), so it is safe to put in a script.
+REF_RE = re.compile(r"(?!-)(?!.*\.\.)(?!.*@\{)(?!.*//)[A-Za-z0-9._/-]+(?<!\.lock)(?<![./])")
+REMOTE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def base_branch_name(base: str | None) -> str | None:
+    """The branch in a free-text base_branch such as "develop (ffbf9ba, ...)" or "origin:main"."""
+    words = (base or "").split()
+    if not words:
+        return None
+    return words[0].rstrip(",;").split(":", 1)[-1].strip() or None
+
+
+def _ref(value: str, what: str) -> str:
+    if not REF_RE.fullmatch(value):
+        raise Invalid(f"{what} {value!r} is not a valid git branch name")
+    return value
 
 
 # ---------------------------------------------------------------- parsing
@@ -159,10 +179,19 @@ LEFT JOIN git_status g ON g.item_id = i.id
 HOLD_SQL = "(COALESCE(i.snoozed_until > date('now','localtime'), 0) OR (i.waiting_for IS NOT NULL AND i.snoozed_until IS NULL))"
 
 
-def _sort_key(it: dict):
-    closed = it["status"] in CLOSED
-    nxt = it["next_milestone"]["date"] if it["next_milestone"] else "9999-12-31"
-    return (closed, nxt, PRIORITIES.index(it["priority"]), -it["id"])
+def _case(column: str, order: dict) -> str:
+    return f"CASE {column} " + " ".join(f"WHEN '{k}' THEN {v}" for k, v in order.items()) + " END"
+
+
+# The same order _item_dict's next_milestone gives, done in SQL so LIMIT applies before rows are
+# shaped: open items first, then soonest pending milestone, priority, newest.
+_RANK_SQL = _case("i.status", RANK)
+_NEXT_SQL = "MIN(" + ", ".join(
+    f"CASE WHEN {_RANK_SQL} < {reached} AND i.{field} IS NOT NULL THEN i.{field} ELSE '9999-12-31' END"
+    for _kind, field, reached in MILESTONES) + ")"
+ITEM_ORDER = (f" ORDER BY i.status IN ({', '.join(repr(c) for c in CLOSED)}),"
+              f" CASE WHEN i.status = 'cancelled' THEN '9999-12-31' ELSE {_NEXT_SQL} END,"
+              f" {_case('i.priority', {p: n for n, p in enumerate(PRIORITIES)})}, i.id DESC")
 
 
 # ---------------------------------------------------------------- projects
@@ -267,10 +296,6 @@ def _insert_item(conn, project_id: int, fields: dict) -> int:
 def list_items(project=None, status=None, assignee=None, kind=None,
                include_closed: bool = False, search=None, limit: int = 200) -> list[dict]:
     where, args = [], []
-    if project:
-        with tx() as conn:
-            where.append("i.project_id = ?")
-            args.append(_get_project(conn, project)["id"])
     if status:
         statuses = [s.strip() for s in str(status).split(",") if s.strip()]
         where.append(f"i.status IN ({', '.join('?' * len(statuses))})")
@@ -286,11 +311,12 @@ def list_items(project=None, status=None, assignee=None, kind=None,
     if search:
         where.append("(i.title LIKE ? OR i.description LIKE ? OR i.branch LIKE ? OR i.ticket_ref LIKE ?)")
         args += [f"%{search}%"] * 4
-    sql = ITEM_SELECT + (" WHERE " + " AND ".join(where) if where else "")
     with tx() as conn:
-        items = [_item_dict(r) for r in conn.execute(sql, args)]
-    items.sort(key=_sort_key)
-    return items[: max(1, int(limit))]
+        if project:
+            where.append("i.project_id = ?")
+            args.append(_get_project(conn, project)["id"])
+        sql = ITEM_SELECT + (" WHERE " + " AND ".join(where) if where else "") + ITEM_ORDER + " LIMIT ?"
+        return [_item_dict(r) for r in conn.execute(sql, (*args, max(1, int(limit))))]
 
 
 def get_item(item_id: int, with_notes: bool = True) -> dict:
@@ -491,7 +517,12 @@ def redate_plan(item_id: int, day=None, start: str = "09:00", end: str = "17:00"
     it = get_item(item_id, with_notes=False)
     if not it["branch"]:
         raise Invalid(f"item #{item_id} has no branch set")
-    base = it["base_branch"] or "main"
+    # Everything that reaches the script is either validated here or shell-quoted below:
+    # agents set these fields over MCP, and the developer runs the result in their shell.
+    branch = _ref(it["branch"], "branch")
+    base = _ref(base_branch_name(it["base_branch"]) or "main", "base_branch")
+    if not REMOTE_RE.fullmatch(remote or ""):
+        raise Invalid(f"remote {remote!r} is not a valid remote name")
     if day:
         target = parse_date(day)
     elif it["commit_date"]:
@@ -511,29 +542,31 @@ def redate_plan(item_id: int, day=None, start: str = "09:00", end: str = "17:00"
     offset = t0.strftime("%z")
     s0, s1 = int(t0.timestamp()), int(t1.timestamp())
     upstream = f"{remote}/{base}"
+    q_branch, q_upstream, q_remote = shlex.quote(branch), shlex.quote(upstream), shlex.quote(remote)
     exec_cmd = (
         'i=$(cat "$REDATE_F"); d="$(( ' + str(s0) + ' + i * REDATE_STEP )) ' + offset + '"; '
         'GIT_COMMITTER_DATE="$d" git commit --amend --no-edit --allow-empty --date="$d" >/dev/null; '
         'echo $((i + 1)) > "$REDATE_F"'
     )
+    title = " ".join(str(it["title"]).split())  # one line, so it stays a comment
     script = "\n".join([
-        f"# Item #{it['id']} {it['title']}",
-        f"# Rebase {it['branch']} onto {upstream} and date its commits {target:%a %d %b %Y} "
+        f"# Item #{it['id']} {title}",
+        f"# Rebase {branch} onto {upstream} and date its commits {target:%a %d %b %Y} "
         f"{t0:%H:%M}-{t1:%H:%M} ({offset}). Run in Git Bash from the repo root.",
         "set -euo pipefail",
-        f"git fetch {remote}",
-        f"git switch {it['branch']}",
-        f'n=$(git rev-list --count "{upstream}..HEAD")',
+        f"git fetch {q_remote}",
+        f"git switch {q_branch}",
+        f'n=$(git rev-list --count {shlex.quote(upstream + "..HEAD")})',
         'REDATE_F=$(mktemp); echo 0 > "$REDATE_F"',
         f"REDATE_STEP=$(( n > 1 ? ({s1} - {s0}) / (n - 1) : 0 ))",
         "export REDATE_F REDATE_STEP",
-        f"git rebase --force-rebase --exec '{exec_cmd}' \"{upstream}\"",
+        f"git rebase --force-rebase --exec {shlex.quote(exec_cmd)} {q_upstream}",
         'rm -f "$REDATE_F"',
-        f'git log --format="%h  %ad  %cd  %s" --date=iso "{upstream}..HEAD"',
-        f'echo "Check the dates above, then: git push --force-with-lease {remote} {it["branch"]}"',
+        f'git log --format="%h  %ad  %cd  %s" --date=iso {shlex.quote(upstream + "..HEAD")}',
+        f'echo {shlex.quote(f"Check the dates above, then: git push --force-with-lease {remote} {branch}")}',
     ])
     return {
-        "item_id": it["id"], "branch": it["branch"], "base": upstream,
+        "item_id": it["id"], "branch": branch, "base": upstream,
         "date": target.isoformat(), "window": f"{t0:%H:%M}-{t1:%H:%M} {offset}",
         "script": script,
         "after": f"Once pushed, set item #{it['id']} status to 'submitted' (and pr_url).",

@@ -1,0 +1,25 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not e2e'"  # run the browser tests with: python -m pytest -m e2e
+markers = ["e2e: drives the dashboard in a real browser (needs the playwright package)"]
+
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 170  # the code favours long, dense lines; this only catches runaway ones
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+  "E731",  # small named lambdas are used on purpose (row builders, sums)
+  "B008",  # FastAPI declares request bodies as Body(...) defaults
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true

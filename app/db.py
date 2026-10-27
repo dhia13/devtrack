@@ -3,8 +3,9 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 
-DB_PATH = os.environ.get("DEVTRACK_DB", "/data/devtrack.db")
-SEED_PROJECTS = os.environ.get("DEVTRACK_SEED_PROJECTS", "")
+from . import config
+
+DB_PATH = config.DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -95,10 +96,27 @@ CREATE TABLE IF NOT EXISTS git_status (
 );
 """
 
-# Columns added after the first release; init() adds whichever are missing.
-MIGRATIONS = {
-    "items": {"waiting_for": "TEXT", "snoozed_until": "TEXT"},
-}
+def _add_columns(conn, table: str, cols: dict) -> None:
+    have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    for col, decl in cols.items():
+        if col not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+
+def _v1_on_hold(conn):
+    # Databases from before versioning may or may not have these, hence _add_columns.
+    _add_columns(conn, "items", {"waiting_for": "TEXT", "snoozed_until": "TEXT"})
+
+
+# Schema changes since the first release, oldest first. PRAGMA user_version records how many a
+# database has had. Append new steps; never edit or reorder old ones. SCHEMA above is always the
+# latest shape, so a new database skips them.
+MIGRATIONS = (_v1_on_hold,)
+SCHEMA_VERSION = len(MIGRATIONS)
+
+
+def schema_version(conn) -> int:
+    return conn.execute("PRAGMA user_version").fetchone()[0]
 
 
 def now() -> str:
@@ -129,16 +147,18 @@ def init() -> None:
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     with tx() as conn:
         conn.execute("PRAGMA journal_mode = WAL")
-        for table, cols in MIGRATIONS.items():
-            have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
-            for col, decl in cols.items():
-                if have and col not in have:
-                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        version = schema_version(conn)
+        if version > SCHEMA_VERSION:
+            raise RuntimeError(f"database schema v{version} is newer than this DevTrack (v{SCHEMA_VERSION}); update the app")
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'items'").fetchone():
+            for step in MIGRATIONS[version:]:
+                step(conn)
         conn.executescript(SCHEMA)
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         empty = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
         if empty:
             ts = now()
-            for slug in filter(None, (s.strip() for s in SEED_PROJECTS.split(","))):
+            for slug in config.SEED_PROJECTS:
                 conn.execute(
                     "INSERT INTO projects (slug, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
                     (slug, slug, ts, ts),

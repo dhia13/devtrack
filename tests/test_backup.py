@@ -52,3 +52,33 @@ def test_due_when_none_or_old():
     assert backup.due()
     backup.create_backup()
     assert not backup.due()
+
+
+def test_restore_while_another_connection_is_open():
+    from app import db
+
+    s.create_item("demo", "snapshot me")
+    snap = backup.create_backup()
+    s.create_item("demo", "lost on restore")
+    reader = db.connect()  # e.g. a request in flight; the WAL file is live
+    try:
+        assert reader.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 2
+        backup.restore(snap["name"])
+        assert reader.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 1
+    finally:
+        reader.close()
+    assert [i["title"] for i in s.list_items("demo")] == ["snapshot me"]
+
+
+def test_restore_endpoint_upgrades_an_old_snapshot(client):
+    snap = backup.create_backup()
+    conn = sqlite3.connect(backup.BACKUP_DIR / snap["name"])
+    conn.execute("PRAGMA user_version = 0")  # as a backup from before schema versions
+    conn.commit()
+    conn.close()
+    r = client.post(f"/api/backups/{snap['name']}/restore")
+    assert r.status_code == 200
+    from app import db
+
+    with db.tx() as c:
+        assert db.schema_version(c) == db.SCHEMA_VERSION

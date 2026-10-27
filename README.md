@@ -77,7 +77,14 @@ sync git, back up, switch theme, filter a project), search items, or open one wi
 Typing a line also offers to create it, reading the extras out of it:
 
 ```
+Fix invoice PDF frub high due friday #bug
 ```
+
+That creates "Fix invoice PDF" in `frub`, priority high, due Friday, kind bug. It understands a
+project slug (or `@slug`), `urgent` / `high` / `low`, `submit|merge|deploy|due <date>` with the
+same dates as the API (`tomorrow`, `+3d`, `friday`, `next friday`, `2026-11-02`), `#bug`-style
+kinds and `for me`. **Shift Enter** creates it even when another result is selected.
+
 ## Focus and time
 
 The focus timer (the island at the top) saves every finished block to DevTrack, linked to an item
@@ -130,15 +137,26 @@ curl -o devtrack-backup.json http://localhost:8787/api/export
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-python -m pytest -q
+python -m pytest -q            # unit and API tests (add --cov for coverage)
+ruff check app tests           # lint
+python -m playwright install chromium && python -m pytest -m e2e   # dashboard in a real browser
 ```
 
 Or inside the image:
 `docker run --rm -u root -v "$PWD:/w" -w /w devtrack sh -c "pip install -q -r requirements-dev.txt && python -m pytest -q"`.
-GitHub Actions runs the tests and a container health check on every push.
+
+Layout: `app/config.py` reads every setting, `app/service.py` holds the logic shared by the REST
+API (`app/main.py`) and the MCP tools (`app/mcp_server.py`), and the dashboard is
+`app/static/index.html` with its `app.js` and `app.css`. Schema changes go at the end of
+`MIGRATIONS` in `app/db.py`; the database's `PRAGMA user_version` records which have run.
+
+GitHub Actions runs lint, the tests with coverage, the browser tests and a container health check
+on every push.
 
 ## Security
 
 There is no login. The port is bound to `127.0.0.1` only, and requests with a `Host` other than
 `localhost` or `127.0.0.1` are rejected (`DEVTRACK_ALLOWED_HOSTS`), which blocks DNS rebinding from
-web pages. Don't publish the port on a network interface without adding authentication.
+web pages. Writes (POST, PATCH, DELETE) sent by another site's page are refused too, using the
+browser's `Origin` and `Sec-Fetch-Site` headers; agents and `curl` don't send them and are unaffected.
+Don't publish the port on a network interface without adding authentication.

@@ -1,23 +1,33 @@
-import pytest
-from fastapi.testclient import TestClient
-
-from app.main import app
-
-
-@pytest.fixture(scope="module")
-def client():
-    # One client for the module: the MCP session manager can only start once per process.
-    with TestClient(app) as c:
-        yield c
-
-
 def test_health_and_meta(client):
     assert client.get("/api/health").json() == {"ok": True}
     assert "parked" in client.get("/api/meta").json()["statuses"]
 
 
+def test_dashboard_and_assets_served(client):
+    page = client.get("/")
+    assert page.status_code == 200 and page.headers["cache-control"] == "no-cache"
+    for asset in ("/static/app.js", "/static/app.css"):
+        assert asset in page.text
+        r = client.get(asset)
+        assert r.status_code == 200 and r.headers["cache-control"] == "no-cache" and r.headers.get("etag")
+    assert client.get("/static/../main.py").status_code == 404
+
+
 def test_foreign_host_rejected(client):
     assert client.get("/api/health", headers={"Host": "evil.example"}).status_code == 400
+
+
+def test_cross_site_writes_refused(client):
+    evil = {"Origin": "https://evil.example"}
+    assert client.post("/api/backups", headers=evil).status_code == 403
+    assert client.post("/api/items", json={"project": "demo", "title": "x"},
+                       headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
+    assert client.post("/api/items", json={"project": "demo", "title": "x"}, headers={"Origin": "null"}).status_code == 403
+    # reads, the dashboard itself, and clients that send no Origin (agents, curl) still work
+    assert client.get("/api/health", headers=evil).status_code == 200
+    ok = {"Origin": "http://localhost:8787", "Sec-Fetch-Site": "same-origin"}
+    assert client.post("/api/items", json={"project": "demo", "title": "x"}, headers=ok).status_code == 200
+    assert client.post("/api/items", json={"project": "demo", "title": "y"}).status_code == 200
 
 
 def test_item_crud_and_errors(client):
@@ -52,6 +62,11 @@ def test_calendar_and_export(client):
     assert client.get("/api/calendar.ics").text.startswith("BEGIN:VCALENDAR")
     data = client.get("/api/export").json()
     assert {"projects", "items", "notes", "focus_sessions"} <= set(data)
+
+
+def test_git_settings(client):
+    r = client.get("/api/git")
+    assert r.status_code == 200 and r.json()["every_minutes"] == 0
 
 
 def test_mcp_endpoint_mounted(client):

@@ -91,3 +91,37 @@ def test_auto_status_from_merged_mr(repos, monkeypatch):
     monkeypatch.setattr(gitsync, "mr_status", lambda *a: {"mr_url": None, "mr_state": "open", "mr_merged_at": None})
     gitsync.sync(item_id=it["id"])
     assert s.get_item(it["id"])["status"] == "merged"
+
+
+def test_mr_status_from_github(repos, monkeypatch):
+    r = repos["app"]
+    run(r, "remote", "add", "origin", "git@github.com:me/app.git")
+    assert gitsync.remote_slug(r) == ("github", "me/app")
+    monkeypatch.setattr(gitsync, "GITHUB_TOKEN", "t")
+    calls = []
+
+    def fake_gh(path):
+        calls.append(path)
+        pr = {"html_url": "https://github.com/me/app/pull/3", "state": "open", "draft": True, "merged_at": None}
+        return [pr] if "pulls?" in path else {**pr, "draft": False, "state": "closed", "merged_at": "2026-01-02T00:00:00Z"}
+
+    monkeypatch.setattr(gitsync, "_gh", fake_gh)
+    found = gitsync.mr_status(None, "feat/x", [r])  # found by branch name
+    assert found == {"mr_url": "https://github.com/me/app/pull/3", "mr_state": "draft", "mr_merged_at": None}
+    assert "head=me%3Afeat/x" in calls[0]
+    by_url = gitsync.mr_status("https://github.com/me/app/pull/3", "feat/x", [r])
+    assert by_url["mr_state"] == "merged" and calls[1] == "repos/me/app/pulls/3"
+    assert gitsync.mr_status(None, "main", [r]) == {}  # trunks have no MR of their own
+
+
+def test_mr_status_reports_http_errors(monkeypatch):
+    import urllib.error
+
+    monkeypatch.setattr(gitsync, "GITLAB_TOKEN", "t")
+
+    def denied(path):
+        raise urllib.error.HTTPError(path, 401, "no", {}, None)
+
+    monkeypatch.setattr(gitsync, "_gl", denied)
+    out = gitsync.mr_status("https://gitlab.com/g/sub/app/-/merge_requests/9", "feat/x", [])
+    assert out == {"error": "MR lookup: token rejected"}

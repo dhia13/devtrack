@@ -1,20 +1,21 @@
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import Body, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import backup, db, gitsync, service as s
+from . import backup, config, db, gitsync, service as s
 from .mcp_server import mcp
 
 log = logging.getLogger("devtrack")
 
 STATIC = Path(__file__).parent / "static"
-ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DEVTRACK_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
+ALLOWED_HOSTS = config.ALLOWED_HOSTS
 
 mcp_app = mcp.streamable_http_app()
 
@@ -43,7 +44,7 @@ def _git_sync():
 async def lifespan(_app):
     db.init()
     jobs = [asyncio.create_task(_every(30 * 60, _backup_if_due))]
-    minutes = float(os.environ.get("DEVTRACK_GIT_SYNC_MINUTES", "15"))
+    minutes = config.GIT_SYNC_MINUTES
     if minutes > 0:
         jobs.append(asyncio.create_task(_every(minutes * 60, _git_sync, first_delay=20)))
     try:
@@ -74,9 +75,23 @@ async def _invalid(_req: Request, exc: s.Invalid):
     return JSONResponse({"error": str(exc)}, status_code=400)
 
 
+# no-cache = revalidate with the ETag on each load, so a rebuilt image's UI shows up at once.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class _Static(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers.update(NO_CACHE)
+        return response
+
+
 @app.get("/", include_in_schema=False)
 def index():
-    return FileResponse(STATIC / "index.html")
+    return FileResponse(STATIC / "index.html", headers=NO_CACHE)
+
+
+app.mount("/static", _Static(directory=STATIC), name="static")
 
 
 @app.get("/api/health")
@@ -91,6 +106,35 @@ def meta():
         "priorities": s.PRIORITIES, "note_kinds": s.NOTE_KINDS,
         "project_statuses": s.PROJECT_STATUSES, "currency": s.DEFAULT_CURRENCY,
     }
+
+
+class SameOriginWrites:
+    """Refuse writes sent by another site's page (CSRF). The Host check alone doesn't stop a page
+    open in your browser from POSTing to localhost; browsers mark those with Origin / Sec-Fetch-Site.
+    Agents and curl send neither header, so they are unaffected."""
+
+    SAFE = {"GET", "HEAD", "OPTIONS"}
+
+    def __init__(self, app, allowed_hosts):
+        self.app, self.allowed = app, {h.lower() for h in allowed_hosts}
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["method"] not in self.SAFE and not self._same_origin(scope):
+            await JSONResponse({"error": "cross-site request refused"}, status_code=403)(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+    def _same_origin(self, scope) -> bool:
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+        if headers.get("sec-fetch-site", "same-origin") not in ("same-origin", "none"):
+            return False
+        origin = headers.get("origin")
+        if origin is None:
+            return True
+        return "*" in self.allowed or (urlsplit(origin).hostname or "").lower() in self.allowed
+
+
+app.add_middleware(SameOriginWrites, allowed_hosts=ALLOWED_HOSTS)
 
 
 # ---- projects
