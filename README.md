@@ -52,6 +52,7 @@ instructions file, with `<slug>` set to that project's slug.
 | `merge_on`, `deploy_on`, `due_on` | planned milestones; they show on the agenda until reached |
 | `estimate_hours`, `actual_hours`, `cost`, `currency` | effort and cost, summed per project |
 | `waiting_for`, `snoozed_until` | on hold: who it waits on, and when to check back (see below) |
+| `repeat_every` | `daily`, `weekly`, `monthly`, `yearly`, or `90d`, `2w`, `3m`: see [Recurring items](#recurring-items) |
 
 Dates accept `YYYY-MM-DD`, `today`, `tomorrow`, `+3d`, `friday`, `next friday`.
 
@@ -98,6 +99,17 @@ The focus timer (the island at the top) saves every finished block to DevTrack, 
 when you start it from one. Ending a block also offers to add its minutes to the item's actual
 hours. **Insights → Time by project** shows focus hours per project for the chosen range, and, for
 items finished in it, estimate vs actual hours and cost, with a CSV download (`/api/time.csv`).
+
+## Recurring items
+
+Give an item `repeat_every` (the **Repeat** field in the item dialog) and marking it done schedules
+the next one: same title, description, kind, assignee, priority, estimate and cost, status `todo`,
+with checklist boxes unticked. Its dates move on by whole periods until the earliest is in the
+future, so a weekly release finished late still lands on the next week, and the gaps between
+submit, deploy and due stay the same. An item with no dates comes back due one period from today.
+Branch, PR and actual hours are not copied. Each copy links back with `repeat_of`, a note on the
+finished item names the new one, and reopening and finishing it again doesn't make a second copy.
+Clear the field to stop repeating.
 
 ## On hold
 

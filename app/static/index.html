@@ -105,6 +105,7 @@ try { const a = JSON.parse(localStorage.getItem("devtrack-look") || "{}"), r = d
           <label class="prop"><span>Merge</span><span class="with-hint"><input type="date" name="merge_on"><em class="hint" data-hint="merge_on"></em></span></label>
           <label class="prop"><span>Deploy</span><span class="with-hint"><input type="date" name="deploy_on"><em class="hint" data-hint="deploy_on"></em></span></label>
           <label class="prop"><span>Due</span><span class="with-hint"><input type="date" name="due_on"><em class="hint" data-hint="due_on"></em></span></label>
+          <label class="prop" title="When it's marked done, a copy is scheduled this far ahead"><span>Repeat</span><input name="repeat_every" placeholder="weekly, 90d, 1m…"></label>
         </div>
         <div class="side-group" id="holdGroup">
           <h5>On hold</h5>

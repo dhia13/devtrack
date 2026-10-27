@@ -13,6 +13,8 @@ All work on this repo is tracked in the `devtrack` MCP server. Project slug: `<s
 - **Anything I have to do** (secrets, approvals, device tests, payments, manual deploys):
   put it in `handoff.user_todos` or create an item with `assignee="me"`. Don't leave it only in chat.
   If it waits on someone else first, set `waiting_for` (and `snoozed_until` to check back).
+  If it comes back on a schedule (cert renewals, monthly reviews, a weekly deploy), set
+  `repeat_every` (e.g. `weekly`, `90d`) so finishing it schedules the next one.
 - **After pushing or opening an MR:** call `git_sync` with the `item_id`, so the item picks up
   the MR and its status.
 - **End of session:** always call `handoff` with summary, done, next_steps and user_todos.

@@ -47,7 +47,9 @@ CREATE TABLE IF NOT EXISTS items (
     updated_at     TEXT NOT NULL,
     completed_at   TEXT,
     waiting_for    TEXT,
-    snoozed_until  TEXT
+    snoozed_until  TEXT,
+    repeat_every   TEXT,
+    repeat_of      INTEGER REFERENCES items(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS items_project ON items(project_id);
 CREATE INDEX IF NOT EXISTS items_status ON items(status);
@@ -108,10 +110,14 @@ def _v1_on_hold(conn):
     _add_columns(conn, "items", {"waiting_for": "TEXT", "snoozed_until": "TEXT"})
 
 
+def _v2_repeat(conn):
+    _add_columns(conn, "items", {"repeat_every": "TEXT", "repeat_of": "INTEGER REFERENCES items(id) ON DELETE SET NULL"})
+
+
 # Schema changes since the first release, oldest first. PRAGMA user_version records how many a
 # database has had. Append new steps; never edit or reorder old ones. SCHEMA above is always the
 # latest shape, so a new database skips them.
-MIGRATIONS = (_v1_on_hold,)
+MIGRATIONS = (_v1_on_hold, _v2_repeat)
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
