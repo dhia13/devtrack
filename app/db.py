@@ -3,8 +3,9 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 
-DB_PATH = os.environ.get("DEVTRACK_DB", "/data/devtrack.db")
-SEED_PROJECTS = os.environ.get("DEVTRACK_SEED_PROJECTS", "")
+from . import config
+
+DB_PATH = config.DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -157,7 +158,7 @@ def init() -> None:
         empty = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
         if empty:
             ts = now()
-            for slug in filter(None, (s.strip() for s in SEED_PROJECTS.split(","))):
+            for slug in config.SEED_PROJECTS:
                 conn.execute(
                     "INSERT INTO projects (slug, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
                     (slug, slug, ts, ts),

@@ -1,13 +1,13 @@
 """Business logic shared by the REST API and the MCP server."""
 
-import os
 import re
 import shlex
 from datetime import date, datetime, time, timedelta
 
+from . import config
 from .db import now, tx
 
-DEFAULT_CURRENCY = os.environ.get("DEVTRACK_CURRENCY", "USD")
+DEFAULT_CURRENCY = config.DEFAULT_CURRENCY
 
 STATUSES = (
     "backlog", "todo", "in_progress", "blocked", "parked",

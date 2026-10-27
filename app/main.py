@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -9,13 +8,13 @@ from fastapi import Body, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import backup, db, gitsync, service as s
+from . import backup, config, db, gitsync, service as s
 from .mcp_server import mcp
 
 log = logging.getLogger("devtrack")
 
 STATIC = Path(__file__).parent / "static"
-ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DEVTRACK_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
+ALLOWED_HOSTS = config.ALLOWED_HOSTS
 
 mcp_app = mcp.streamable_http_app()
 
@@ -44,7 +43,7 @@ def _git_sync():
 async def lifespan(_app):
     db.init()
     jobs = [asyncio.create_task(_every(30 * 60, _backup_if_due))]
-    minutes = float(os.environ.get("DEVTRACK_GIT_SYNC_MINUTES", "15"))
+    minutes = config.GIT_SYNC_MINUTES
     if minutes > 0:
         jobs.append(asyncio.create_task(_every(minutes * 60, _git_sync, first_delay=20)))
     try:

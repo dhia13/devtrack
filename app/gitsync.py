@@ -18,15 +18,15 @@ import urllib.request
 from datetime import date, datetime
 from pathlib import Path
 
-from . import service as s
+from . import config, service as s
 from .db import now, tx
 
-REPOS_ROOT = Path(os.environ.get("DEVTRACK_REPOS_ROOT", "/repos"))
-REPOS_HOST = os.environ.get("DEVTRACK_REPOS_HOST", "").replace("\\", "/").rstrip("/")
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
-GITLAB_TOKEN = os.environ.get("GITLAB_TOKEN", "").strip()
-GITLAB_URL = os.environ.get("GITLAB_URL", "https://gitlab.com").rstrip("/")
-AUTO_STATUS = os.environ.get("DEVTRACK_GIT_AUTO_STATUS", "1") not in ("0", "false", "no")
+REPOS_ROOT = config.REPOS_ROOT
+REPOS_HOST = config.REPOS_HOST
+GITHUB_TOKEN = config.GITHUB_TOKEN
+GITLAB_TOKEN = config.GITLAB_TOKEN
+GITLAB_URL = config.GITLAB_URL
+AUTO_STATUS = config.GIT_AUTO_STATUS
 
 GH_PR = re.compile(r"https?://github\.com/([^/]+/[^/]+)/pull/(\d+)")
 GL_MR = re.compile(r"https?://[^/]+/(.+?)/-/merge_requests/(\d+)")
@@ -312,7 +312,7 @@ def config() -> dict:
         "mounted": REPOS_ROOT.is_dir() and any(REPOS_ROOT.iterdir()),
         "github_token": bool(GITHUB_TOKEN), "gitlab_token": bool(GITLAB_TOKEN), "gitlab_url": GITLAB_URL,
         "auto_status": AUTO_STATUS,
-        "every_minutes": float(os.environ.get("DEVTRACK_GIT_SYNC_MINUTES", "15")),
+        "every_minutes": config.GIT_SYNC_MINUTES,
         "last_run": last_run or None,
         "today": date.today().isoformat(),
     }

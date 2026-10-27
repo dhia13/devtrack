@@ -6,11 +6,12 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from . import config
 from .db import DB_PATH, SCHEMA_VERSION
 
-BACKUP_DIR = Path(os.environ.get("DEVTRACK_BACKUP_DIR", "/backups"))
-KEEP = max(1, int(os.environ.get("DEVTRACK_BACKUP_KEEP", "14")))
-EVERY = timedelta(hours=float(os.environ.get("DEVTRACK_BACKUP_EVERY_HOURS", "24")))
+BACKUP_DIR = config.BACKUP_DIR
+KEEP = config.BACKUP_KEEP
+EVERY = timedelta(hours=config.BACKUP_EVERY_HOURS)
 NAME_RE = re.compile(r"devtrack-(\d{8}-\d{6})(?:-([a-z-]+))?\.db")
 
 
@@ -53,7 +54,7 @@ def _files() -> list[Path]:
 
 def list_backups() -> dict:
     files = _files()
-    return {"dir": str(BACKUP_DIR), "host_dir": os.environ.get("DEVTRACK_BACKUP_HOST_DIR"), "keep": KEEP,
+    return {"dir": str(BACKUP_DIR), "host_dir": config.BACKUP_HOST_DIR, "keep": KEEP,
             "every_hours": EVERY.total_seconds() / 3600, "writable": _writable(),
             "backups": [_info(p) for p in files]}
 
